@@ -456,6 +456,20 @@ function createSimulationArtifacts(request) {
       "로컬 실행판:",
       "`python3 server.py`로 열면 실제 AI가 Codex용 프롬프트 패키지를 만든다.",
     ].join("\n"),
+    hr: [
+      "# 인사평가 및 결근 처리",
+      "",
+      "- 회사 운영 점수: 94/100",
+      "- 결근 처리: 0건",
+      "- 대체 투입 성공: 0건",
+      "- Finalizer 라우트: simulation/github-pages",
+      "",
+      "## 운영 원칙",
+      "",
+      "- 한 명이 결근해도 다음 담당자가 업무를 이어받는다.",
+      "- 외부 API가 실패해도 로컬 모델 또는 비상 산출물로 최소 결과를 만든다.",
+      "- Codex 부대표는 직원 산출물을 보고 실제 코드 작성과 검증을 맡는다.",
+    ].join("\n"),
     qualityScore: 88,
   };
 }
@@ -465,11 +479,11 @@ function shouldUseBackend() {
 }
 
 function updateArtifactCount() {
-  const created = ["log", "brief", "plan", "design", "dev", "final"].filter((key) => {
+  const created = ["log", "brief", "plan", "design", "dev", "final", "hr"].filter((key) => {
     if (key === "log") return logs.length > 0;
     return Boolean(artifacts[key]);
   }).length;
-  els.artifactCount.textContent = `${created}/6`;
+  els.artifactCount.textContent = `${created}/7`;
 }
 
 function renderArtifact() {
@@ -606,6 +620,9 @@ async function runOffice() {
         addLog(`프로젝트 타입: ${backendResult.project_type}`);
       }
       addLog(`모델: ${backendResult.model}`);
+      if (pendingArtifacts.hr) {
+        addLog("HR: 결근 처리와 인사평가가 기록되었습니다.");
+      }
       if (backendResult.model_candidates && backendResult.model_candidates.length > 1) {
         addLog(`대기 모델: ${backendResult.model_candidates.join(" -> ")}`);
       }
@@ -699,6 +716,7 @@ async function runOffice() {
     moveAgentPath("changwoo", [positions.hallway.center, positions.hallway.delivery, positions.changwoo.delivery], "Changwoo is checking final delivery"),
   ]);
   artifacts.final = pendingArtifacts.final;
+  artifacts.hr = pendingArtifacts.hr;
   showPaper("final");
   els.deliveryBox.classList.add("complete");
   await say("mike", "Codex용 최종 프롬프트 준비됐습니다.", 1200);

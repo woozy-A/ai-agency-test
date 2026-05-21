@@ -352,6 +352,117 @@ def ask_final_editor(client, role_prompt: str, user_prompt: str, important: bool
     raise last_error or RuntimeError("Finalizer 호출에 실패했습니다.")
 
 
+ROLE_FALLBACKS = {
+    "pm": ["mike", "nora", "iris"],
+    "structure": ["mina", "nora", "dana"],
+    "dev": ["jay", "dana", "mike"],
+    "qa": ["yuna", "testkim", "jason", "vera"],
+}
+
+
+def role_absence_summary(exc: Exception) -> str:
+    text = str(exc).replace("\n", " ").strip()
+    return text[:160] or exc.__class__.__name__
+
+
+def emergency_role_output(role_label: str, request: str, failures: list[str]) -> str:
+    return (
+        f"## Emergency {role_label} Output\n\n"
+        "지정된 담당자와 대체 담당자가 모두 응답하지 않아 최소 운영 규칙으로 산출물을 생성합니다.\n\n"
+        f"- 원 요청: {request}\n"
+        "- 처리 원칙: 범위를 작게 유지하고, Codex가 바로 실행할 수 있는 지시와 검증 기준을 우선한다.\n"
+        "- 검수 필요: 이 섹션은 모델 검토 없이 생성된 비상 산출물이므로 창우가 핵심 범위와 위험 항목을 확인해야 한다.\n"
+        f"- 실패 기록: {' / '.join(failures)}"
+    )
+
+
+def run_role_task(
+    client,
+    role_key: str,
+    role_label: str,
+    role_prompt: str,
+    user_prompt: str,
+    request: str,
+    performance: list[dict[str, str]],
+) -> str:
+    failures = []
+    for index, agent_key in enumerate(ROLE_FALLBACKS[role_key]):
+        agent = AGENT_ROLES[agent_key]
+        provider = get_agent_provider(agent_key)
+        model = get_agent_model(agent_key)
+        route = f"{provider}/{model}"
+        try:
+            result = ask_agent(client, agent["name"], role_prompt, user_prompt, model, provider)
+            performance.append(
+                {
+                    "role": role_label,
+                    "agent": agent["name"],
+                    "route": route,
+                    "status": "대체 성공" if index else "정상 출근",
+                    "note": "담당자가 업무를 완료했습니다." if index == 0 else f"{ROLE_FALLBACKS[role_key][0]} 결근으로 대체 투입되었습니다.",
+                }
+            )
+            return result
+        except Exception as exc:
+            failure = role_absence_summary(exc)
+            failures.append(f"{agent['name']}({failure})")
+            performance.append(
+                {
+                    "role": role_label,
+                    "agent": agent["name"],
+                    "route": route,
+                    "status": "결근",
+                    "note": failure,
+                }
+            )
+
+    performance.append(
+        {
+            "role": role_label,
+            "agent": "Emergency Desk",
+            "route": "internal/rule-based",
+            "status": "비상 운영",
+            "note": "모든 담당자와 대체자가 실패해 최소 산출물을 생성했습니다.",
+        }
+    )
+    return emergency_role_output(role_label, request, failures)
+
+
+def build_hr_report(performance: list[dict[str, str]], final_route: str) -> str:
+    absences = [item for item in performance if item["status"] == "결근"]
+    backups = [item for item in performance if item["status"] == "대체 성공"]
+    emergencies = [item for item in performance if item["status"] == "비상 운영"]
+    score = max(0, 100 - len(absences) * 8 - len(emergencies) * 20 + len(backups) * 2)
+
+    lines = [
+        "# 인사평가 및 결근 처리",
+        "",
+        f"- 회사 운영 점수: {min(score, 100)}/100",
+        f"- Finalizer 라우트: {final_route}",
+        f"- 결근 처리: {len(absences)}건",
+        f"- 대체 투입 성공: {len(backups)}건",
+        f"- 비상 운영: {len(emergencies)}건",
+        "",
+        "## 직원별 업무 기록",
+        "",
+    ]
+    for item in performance:
+        lines.append(f"- {item['role']} / {item['agent']} / {item['route']} / {item['status']}: {item['note']}")
+
+    lines.extend(
+        [
+            "",
+            "## 운영 원칙",
+            "",
+            "- 한 명이 결근해도 다음 담당자가 업무를 이어받는다.",
+            "- 외부 API가 실패해도 로컬 모델 또는 비상 산출물로 최소 결과를 만든다.",
+            "- 반복 결근 모델은 기본 라우팅에서 제외하거나 낮은 우선순위로 내린다.",
+            "- Codex 부대표는 직원 산출물을 보고 실제 코드 작성과 검증을 맡는다.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def is_model_fallback_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return any(
@@ -707,46 +818,82 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
     jay_model = get_agent_model("jay")
     yuna_model = get_agent_model("yuna")
     important = is_important_request(request)
+    performance = []
 
-    brief = ask_agent(
+    brief = run_role_task(
         client,
-        "Mike",
+        "pm",
+        "PM / 기획",
         mike_role,
         f"창우의 요청:\n{request}\n\n1) 요구사항\n2) 구현 범위\n3) 성공 기준\n4) Jay/Yuna가 봐야 할 쟁점을 작성해줘.",
-        mike_model,
-        mike_provider,
+        request,
+        performance,
     )
-    design = ask_agent(
+    design = run_role_task(
         client,
-        "Mina",
+        "structure",
+        "기획 보조 / 구조",
         mina_role,
         f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\nCodex 프롬프트에 들어갈 사용자 흐름, 화면/파일 구조, 산출물 형태를 제안해줘.",
-        mina_model,
-        mina_provider,
+        request,
+        performance,
     )
-    dev = ask_agent(
+    dev = run_role_task(
         client,
-        "Jay",
+        "dev",
+        "Dev / 구현안",
         jay_role,
         f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\nMina 결과:\n{design}\n\nCodex가 실제 코드 작성/수정에 착수할 수 있도록 구현안, 파일 구조, 명령어, 테스트 전략을 작성해줘.",
-        jay_model,
-        jay_provider,
+        request,
+        performance,
     )
-    review = ask_agent(
+    review = run_role_task(
         client,
-        "Yuna",
+        "qa",
+        "QA / 비판",
         yuna_role,
         f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\n버그, 성능, 예외 케이스, 누락된 검증을 중심으로 비판해줘.",
-        yuna_model,
-        yuna_provider,
+        request,
+        performance,
     )
-    final, final_route = ask_final_editor(
-        client,
-        final_role,
+    final_prompt_input = (
         f"원 요청:\n{request}\n\nPM/기획 Mike:\n{brief}\n\n구조 정리 Mina:\n{design}\n\nDev/구현안 Jay:\n{dev}\n\nQA/비판 Yuna:\n{review}\n\n"
-        "이 내용을 하나의 Codex용 최종 프롬프트로 압축해줘. 설명문이 아니라, 바로 붙여넣어 실행할 지시문이어야 한다.",
-        important,
+        "이 내용을 하나의 Codex용 최종 프롬프트로 압축해줘. 설명문이 아니라, 바로 붙여넣어 실행할 지시문이어야 한다."
     )
+    try:
+        final, final_route = ask_final_editor(client, final_role, final_prompt_input, important)
+    except Exception as exc:
+        final_route = "internal/emergency-finalizer"
+        final = (
+            "# Codex 실행 프롬프트\n\n"
+            "아래 요청을 구현 전에 성공 기준을 먼저 세우고, 구현 후 자동 검증과 직접 검수 시나리오를 보고하는 방식으로 처리해줘.\n\n"
+            f"## 원 요청\n{request}\n\n"
+            f"## PM / 기획\n{brief}\n\n"
+            f"## 구조\n{design}\n\n"
+            f"## 구현안\n{dev}\n\n"
+            f"## QA / 위험\n{review}\n\n"
+            "## 완료 보고 형식\n"
+            "- 자동 검증 완료 항목\n- 검수 필요 항목\n- 위험한 항목\n- 변경 파일\n- 실행 방법\n"
+        )
+        performance.append(
+            {
+                "role": "Final Editor",
+                "agent": "Finalizer",
+                "route": final_route,
+                "status": "비상 운영",
+                "note": role_absence_summary(exc),
+            }
+        )
+    performance.append(
+        {
+            "role": "Final Editor",
+            "agent": "Finalizer",
+            "route": final_route,
+            "status": "정상 납품" if final_route != "internal/emergency-finalizer" else "비상 납품",
+            "note": "최종 Codex 프롬프트를 압축했습니다.",
+        }
+    )
+    hr = build_hr_report(performance, final_route)
 
     artifacts = {
         "brief": brief,
@@ -755,12 +902,13 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         "dev": dev,
         "review": review,
         "final": final,
+        "hr": hr,
     }
     models = (
         f"Mike={mike_provider}/{mike_model}, Mina={mina_provider}/{mina_model}, Jay={jay_provider}/{jay_model}, "
         f"Yuna={yuna_provider}/{yuna_model}, Finalizer={final_route}"
     )
-    return artifacts, [], 5, models
+    return artifacts, [], len(performance), models
 
 
 def get_agent_config() -> dict:

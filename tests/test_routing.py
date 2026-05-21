@@ -12,6 +12,7 @@ from server import (
     is_important_request,
     normalize_artifacts,
     project_file_contract,
+    run_role_task,
 )
 
 
@@ -127,6 +128,33 @@ class ProjectRoutingTest(unittest.TestCase):
             ],
         )
         self.assertEqual(route, "gemini/gemini-2.5-flash -> gemini/gemini-2.0-flash -> ollama/qwen3:14b")
+
+    def test_role_absence_uses_backup_agent(self):
+        performance = []
+        calls = []
+
+        def fake_ask(_client, agent_name, *_args):
+            calls.append(agent_name)
+            if agent_name == "Mike":
+                raise RuntimeError("vacation")
+            return "Nora handled it"
+
+        with patch("server.ask_agent", side_effect=fake_ask):
+            result = run_role_task(None, "pm", "PM / 기획", "role", "prompt", "request", performance)
+
+        self.assertEqual(result, "Nora handled it")
+        self.assertEqual(calls[:2], ["Mike", "Nora"])
+        self.assertEqual(performance[0]["status"], "결근")
+        self.assertEqual(performance[1]["status"], "대체 성공")
+
+    def test_role_absence_keeps_company_running_with_emergency_output(self):
+        performance = []
+
+        with patch("server.ask_agent", side_effect=RuntimeError("all out")):
+            result = run_role_task(None, "dev", "Dev / 구현안", "role", "prompt", "request", performance)
+
+        self.assertIn("Emergency Dev / 구현안 Output", result)
+        self.assertEqual(performance[-1]["status"], "비상 운영")
 
 
 if __name__ == "__main__":
