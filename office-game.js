@@ -113,7 +113,7 @@ function addLog(text) {
   if (activeArtifact === "log") renderArtifact();
 }
 
-async function runBackendPipeline(request) {
+async function runBackendPipeline(request, attempt = 0) {
   const response = await fetch("/api/run", {
     method: "POST",
     headers: {
@@ -122,6 +122,13 @@ async function runBackendPipeline(request) {
     body: JSON.stringify({ request }),
   });
   const payload = await response.json();
+  if (!response.ok && payload.retryable && attempt < 2) {
+    const retryAfter = Math.min(Number(payload.retry_after || 60), 300);
+    addLog(`일시 오류. ${retryAfter}초 후 자동 재시도합니다. (${attempt + 1}/2)`);
+    setTask("Retrying", `Waiting ${retryAfter}s before retry`);
+    await sleep(retryAfter * 1000);
+    return runBackendPipeline(request, attempt + 1);
+  }
   if (!response.ok || !payload.ok) {
     throw new Error(payload.error || "AI pipeline request failed");
   }
@@ -257,6 +264,9 @@ async function runOffice() {
       backendResult = await runBackendPipeline(request);
       pendingArtifacts = backendResult.artifacts;
       addLog(`AI pipeline completed with ${backendResult.provider}/${backendResult.mode || "one_call"}`);
+      if (backendResult.project_type) {
+        addLog(`프로젝트 타입: ${backendResult.project_type}`);
+      }
       addLog(`모델: ${backendResult.model}`);
       addLog(`실제 API 호출 수: ${backendResult.calls || 1}`);
       addLog(`결과 저장 위치: ${backendResult.output_dir}`);
