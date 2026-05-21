@@ -1,6 +1,6 @@
 import unittest
 
-from server import detect_project_type, project_file_contract
+from server import detect_project_type, normalize_artifacts, project_file_contract
 
 
 class ProjectRoutingTest(unittest.TestCase):
@@ -18,7 +18,25 @@ class ProjectRoutingTest(unittest.TestCase):
         contract = project_file_contract("macos_swiftui")
         self.assertIn("Package.swift", contract)
         self.assertIn("main.swift", contract)
-        self.assertIn("HTML/CSS/JS 파일을 만들지 마라", contract)
+        self.assertIn("HTML/CSS/JS가 아니라", contract)
+
+    def test_prompt_package_files_are_normalized(self):
+        _, files = normalize_artifacts(
+            {
+                "brief": "brief",
+                "plan": "plan",
+                "design": "design",
+                "dev": "dev",
+                "review": "review",
+                "final": "final",
+                "files": [
+                    {"path": "generated_prompt/codex_prompt.md", "content": "# Prompt"},
+                    {"path": "../bad.md", "content": "safe path"},
+                ],
+            }
+        )
+        self.assertEqual(files[0]["path"], "generated_prompt/codex_prompt.md")
+        self.assertEqual(files[1]["path"], "bad.md")
 
 
 if __name__ == "__main__":

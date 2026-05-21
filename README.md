@@ -1,6 +1,6 @@
-# AI Agency Pipeline Sample
+# Changwoo Prompt Agency
 
-This is a small learning project for understanding how an automated AI agency pipeline can be structured.
+This is a small learning project for turning rough tasks into high-quality Codex prompts.
 
 ## Visual Demo
 
@@ -21,17 +21,17 @@ Each step creates an artifact:
 - `review.md`
 - `final.md`
 
-## Pixel Office Demo
+## Pixel Prompt Office
 
 Open `office-game.html` in a browser.
 
-This version shows the same pipeline as a retro office simulation:
+This version shows the prompt agency as a retro office simulation:
 
 ```text
-Changwoo -> Mike PM -> Mina Designer + Jay Developer -> Yuna Reviewer -> Delivery
+Changwoo task -> Mike PM -> Mina UX + Jay prompt engineer -> Yuna reviewer -> Codex prompt package
 ```
 
-It is still a front-end simulation, but it makes the agent handoff easier to understand.
+On GitHub Pages it runs as a simulation. On localhost it calls the local backend and creates a prompt package.
 
 ## Local AI Backend
 
@@ -72,16 +72,23 @@ Open:
 http://localhost:8000/office-game.html
 ```
 
-When opened through `localhost`, the pixel office calls the backend and runs the AI agent pipeline. When opened on GitHub Pages, it stays in simulation mode so the public demo still works.
+When opened through `localhost`, the pixel office calls the backend and creates a Codex-ready prompt package. When opened on GitHub Pages, it stays in simulation mode so the public demo still works.
 
 The local backend uses one AI request per run. The single response is split into:
 
 - Mike PM brief
 - Mike plan
-- Mina design notes
-- Jay build notes
-- Yuna review
-- Final delivery
+- Mina UX requirements
+- Jay implementation prompt notes
+- Yuna review/checklist
+- Final Codex prompt package
+
+Each run is saved under `outputs/` and includes:
+
+- `generated_prompt/codex_prompt.md`
+- `generated_prompt/acceptance_checklist.md`
+- `generated_prompt/test_plan.md`
+- `generated_prompt/risk_notes.md`
 
 This keeps the learning version cheaper than calling one model per agent.
 
@@ -100,26 +107,13 @@ YUNA_MODEL=gemini-2.5-flash
 FINAL_MODEL=gemini-2.5-flash-lite
 ```
 
-Multi-agent mode is easier to understand, but it uses five API calls per run.
-
-## Code Demo
-
-Run the local Python sample:
-
-```bash
-python3 src/main.py "신규 온라인 강의 런칭을 위한 랜딩페이지 카피와 SNS 홍보 문구를 만들어줘."
-```
-
-The command creates a new folder under `outputs/`.
+Multi-agent mode is easier to understand, but it uses five API calls per run. One-call mode is recommended for the free tier.
 
 ## How To Extend
 
-Start by replacing one fake function at a time:
+Useful next steps:
 
-1. Replace `build_brief()` with an AI API call.
-2. Replace `build_plan()` with a planning prompt.
-3. Replace `generate_draft()` with a generator prompt.
-4. Replace `review_draft()` with a review prompt.
-5. Replace `finalize()` with a final editing prompt.
-
-Keep the artifact files even after adding real AI calls. They make the pipeline easier to debug.
+1. Add more project type routing rules.
+2. Add prompt quality scoring.
+3. Add a copy button for `codex_prompt.md`.
+4. Add a mode that sends the generated prompt directly into another Codex session.

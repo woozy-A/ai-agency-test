@@ -204,7 +204,9 @@ def normalize_artifacts(data: dict) -> tuple[dict[str, str], list[dict[str, str]
     for item in files:
         if not isinstance(item, dict):
             continue
-        path = str(item.get("path", "")).strip().lstrip("/").replace("..", "")
+        path = re.sub(r"/+", "/", str(item.get("path", "")).strip().replace("\\", "/"))
+        path = path.lstrip("/")
+        path = "/".join(part for part in path.split("/") if part not in ("", ".", ".."))
         content = str(item.get("content", ""))
         if path and content:
             clean_files.append({"path": path, "content": content})
@@ -228,42 +230,41 @@ def project_file_contract(project_type: str) -> str:
     contracts = {
         "web_static": """
 project_type은 web_static이다.
-files는 반드시 아래 경로를 우선 생성한다:
-- generated_app/index.html
-- generated_app/style.css
-- generated_app/app.js
-브라우저에서 index.html을 바로 열 수 있어야 한다.
+Codex가 만들 결과물은 보통 아래 구조를 목표로 한다:
+- index.html
+- style.css
+- app.js
+단, 너는 앱 코드를 직접 납품하지 말고 Codex가 위 파일을 만들도록 정확한 프롬프트를 작성한다.
 """,
         "macos_swiftui": """
 project_type은 macos_swiftui이다.
-files는 반드시 아래 Swift Package 구조를 생성한다:
-- generated_app/Package.swift
-- generated_app/Sources/GeneratedMacApp/main.swift
-SwiftUI macOS 앱으로 작성한다. 지뢰찾기 같은 게임 요청이면 main.swift 안에 실행 가능한 SwiftUI 앱 코드를 넣는다.
-Xcode에서는 Package.swift를 열 수 있어야 한다.
-HTML/CSS/JS 파일을 만들지 마라.
+Codex가 만들 결과물은 보통 아래 Swift Package 또는 Xcode 친화 구조를 목표로 한다:
+- Package.swift
+- Sources/GeneratedMacApp/main.swift
+SwiftUI macOS 앱으로 작성하도록 지시한다. 지뢰찾기 같은 게임 요청이면 게임 상태 모델과 UI를 분리하도록 요구한다.
+HTML/CSS/JS가 아니라 SwiftUI/macOS 산출물을 만들도록 프롬프트에 명확히 적는다.
 """,
         "python_cli": """
 project_type은 python_cli이다.
-files는 반드시 아래 경로를 우선 생성한다:
-- generated_app/main.py
-- generated_app/README.md
-표준 라이브러리 위주로 바로 실행 가능하게 작성한다.
+Codex가 만들 결과물은 보통 아래 구조를 목표로 한다:
+- main.py
+- README.md
+표준 라이브러리 위주로 바로 실행 가능하게 지시한다.
 """,
         "node_cli": """
 project_type은 node_cli이다.
-files는 반드시 아래 경로를 우선 생성한다:
-- generated_app/package.json
-- generated_app/index.js
-- generated_app/README.md
-Node.js로 바로 실행 가능하게 작성한다.
+Codex가 만들 결과물은 보통 아래 구조를 목표로 한다:
+- package.json
+- index.js
+- README.md
+Node.js로 바로 실행 가능하게 지시한다.
 """,
         "documentation": """
 project_type은 documentation이다.
-files는 반드시 아래 경로를 우선 생성한다:
-- generated_app/README.md
-- generated_app/plan.md
-실행 앱이 아니라 문서 산출물로 작성한다.
+Codex가 만들 결과물은 보통 아래 문서 구조를 목표로 한다:
+- README.md
+- plan.md
+실행 앱이 아니라 문서 산출물을 만들도록 지시한다.
 """,
     }
     return contracts.get(project_type, contracts["web_static"])
@@ -297,11 +298,12 @@ def save_run(request: str, artifacts: dict[str, str], files: list[dict[str, str]
 def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
     project_type = detect_project_type(request)
     role_prompt = (
-        "너는 작은 AI 에이전시 전체를 한 번에 실행하는 오케스트레이터다. "
+        "너는 Codex 프롬프트 제작 전문 AI 에이전시의 오케스트레이터다. "
         "실제로는 API 호출을 한 번만 사용하지만, 결과는 Mike PM, Mina Designer, Jay Developer, "
         "Yuna Reviewer, Finalizer가 각각 일한 것처럼 나눠서 작성한다. "
-        "창우는 계획서가 아니라 바로 열어볼 수 있는 결과물을 원한다. "
-        "요청 타입에 맞는 실행 가능한 파일을 생성한다. "
+        "창우는 네가 직접 앱을 만드는 것이 아니라, Codex에 그대로 붙여넣으면 좋은 결과가 나오는 "
+        "고품질 작업 프롬프트와 검증 체크리스트를 원한다. "
+        "요청 타입에 맞게 Codex가 만들 파일, 성공 기준, 테스트, 검수 절차를 명확히 설계한다. "
         "반드시 순수 JSON 객체만 반환한다. 마크다운 코드블록을 쓰지 않는다."
     )
     file_contract = project_file_contract(project_type)
@@ -312,30 +314,34 @@ def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], list[di
 판단된 project_type:
 {project_type}
 
-파일 생성 규칙:
+Codex 작업 설계 규칙:
 {file_contract}
 
 다음 JSON 키를 모두 포함해서 한국어로 작성해줘.
 
 {{
   "project_type": "{project_type}",
-  "brief": "Mike PM이 5줄 이내로 정리한 목표와 산출물",
-  "plan": "오늘 바로 끝내는 3~5단계 실행 계획. 몇 주짜리 일정 금지",
-  "design": "Mina Designer의 화면/UX/콘텐츠 구조 제안",
-  "dev": "Jay Developer의 구현 요약과 파일 설명",
-  "review": "Yuna Reviewer의 짧은 검토와 수정 반영 내역",
-  "final": "창우에게 납품하는 최종 요약. 생성된 파일을 어떻게 열면 되는지 설명",
+  "brief": "Mike PM이 정리한 목표, 범위, 제외 범위, 산출물",
+  "plan": "Codex에게 시킬 작업 순서. 구현 전 성공 기준부터 검증까지 포함",
+  "design": "Mina Designer가 정리한 UX/화면/사용 흐름 요구사항",
+  "dev": "Jay Developer가 정리한 기술 요구사항, 파일 구조, 구현 지시",
+  "review": "Yuna Reviewer가 정리한 acceptance checklist, test plan, risks",
+  "final": "창우에게 설명하는 최종 요약과 Codex 사용 방법",
   "files": [
-    {{"path": "generated_app/타입에_맞는_파일명", "content": "실제 파일 내용"}}
+    {{"path": "generated_prompt/codex_prompt.md", "content": "Codex에 그대로 붙여넣을 최종 프롬프트"}},
+    {{"path": "generated_prompt/acceptance_checklist.md", "content": "성공 기준 체크리스트"}},
+    {{"path": "generated_prompt/test_plan.md", "content": "자동/수동 테스트 계획"}},
+    {{"path": "generated_prompt/risk_notes.md", "content": "위험 요소와 완화책"}}
   ]
 }}
 
 규칙:
-- 요청이 앱/웹페이지/도구 제작이면 files에 실제 실행 가능한 파일을 넣어라.
-- web_static 투두리스트 앱은 할 일 추가, 완료 체크, 삭제, 남은 개수 표시, localStorage 저장을 구현해라.
-- macos_swiftui 요청에는 SwiftUI 파일을 만들고 HTML을 만들지 마라.
-- 3주 계획, 회의 일정, 장기 마일스톤을 쓰지 마라.
-- 파일 content에는 설명이 아니라 실제 코드만 넣어라.
+- 코드를 직접 완성해서 납품하지 말고, Codex가 구현하도록 지시하는 프롬프트를 납품한다.
+- codex_prompt.md는 반드시 아래 섹션을 포함한다: 목표, 성공 기준, 구현 지시, 파일 구조, 자동 테스트, 직접 검수 시나리오, 보고 형식.
+- 성공 기준은 체크박스 목록으로 작성한다.
+- 테스트 계획은 가능한 자동 테스트와 수동 검수를 구분한다.
+- 위험 요소는 빌드 실패, 범위 초과, 플랫폼 차이, 모델 한계 등을 현실적으로 적는다.
+- "3주 계획", "회의 일정", "언젠가 구현" 같은 장기 계획을 쓰지 말고, Codex가 바로 실행할 수 있는 단위로 쓴다.
 """
 
     model = get_model()
@@ -343,18 +349,11 @@ def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], list[di
     artifacts, files = normalize_artifacts(extract_json_object(raw))
     if files:
         file_list = "\n".join(f"- `{item['path']}`" for item in files)
-        open_hint = {
-            "web_static": "`generated_app/index.html`을 브라우저로 열면 결과물을 볼 수 있습니다.",
-            "macos_swiftui": "`generated_app/Package.swift`를 Xcode로 열거나 `swift run`으로 실행해보세요.",
-            "python_cli": "`generated_app/main.py`를 `python3 main.py`로 실행해보세요.",
-            "node_cli": "`generated_app`에서 `npm install` 후 `npm start`로 실행해보세요.",
-            "documentation": "`generated_app/README.md`부터 확인하세요.",
-        }.get(project_type, "`generated_app` 폴더를 확인하세요.")
         artifacts["final"] = (
             artifacts["final"].rstrip()
-            + "\n\n## 생성된 파일\n\n"
+            + "\n\n## 생성된 프롬프트 패키지\n\n"
             + file_list
-            + f"\n\n{open_hint}"
+            + "\n\n`generated_prompt/codex_prompt.md` 내용을 Codex에 붙여넣으면 됩니다."
         )
     return artifacts, files, 1, model
 

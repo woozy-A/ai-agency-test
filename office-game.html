@@ -11,12 +11,12 @@
       <section class="game-layout">
         <aside class="side-panel">
           <div class="brand-block">
-            <p class="eyebrow">Pixel agents</p>
-            <h1>Changwoo AI Agency</h1>
+            <p class="eyebrow">Codex prompt lab</p>
+            <h1>Changwoo Prompt Agency</h1>
           </div>
 
-          <label for="requestInput">창우 사장의 업무 지시</label>
-          <textarea id="requestInput" rows="7">로컬에서 실행되는 간단한 투두리스트 앱을 만들어줘. 할 일 추가, 완료 체크, 삭제, 남은 개수 표시가 있으면 좋겠어.</textarea>
+          <label for="requestInput">창우 사장의 과제</label>
+          <textarea id="requestInput" rows="7">SwiftUI로 macOS용 지뢰찾기 게임을 만들고 싶어. Codex에 넣을 좋은 작업 프롬프트를 만들어줘.</textarea>
 
           <div class="button-row">
             <button id="startButton" type="button">Start</button>
@@ -43,21 +43,21 @@
               <span class="swatch design"></span>
               <div>
                 <strong>Mina</strong>
-                <small>Designer</small>
+                <small>UX Planner</small>
               </div>
             </div>
             <div class="team-member" data-agent-card="jay">
               <span class="swatch dev"></span>
               <div>
                 <strong>Jay</strong>
-                <small>Developer</small>
+                <small>Tech Writer</small>
               </div>
             </div>
             <div class="team-member" data-agent-card="yuna">
               <span class="swatch review"></span>
               <div>
                 <strong>Yuna</strong>
-                <small>Reviewer</small>
+                <small>QA Reviewer</small>
               </div>
             </div>
           </section>
@@ -100,10 +100,10 @@
             <div class="meeting-table"></div>
             <div class="delivery-box" id="deliveryBox">OUT</div>
 
-            <div class="paper request-paper" id="requestPaper">REQ</div>
+            <div class="paper request-paper" id="requestPaper">TASK</div>
             <div class="paper brief-paper" id="briefPaper">BRF</div>
-            <div class="paper draft-paper" id="draftPaper">DRF</div>
-            <div class="paper final-paper" id="finalPaper">FIN</div>
+            <div class="paper draft-paper" id="draftPaper">CHK</div>
+            <div class="paper final-paper" id="finalPaper">PRM</div>
 
             <div class="agent boss-agent" data-agent="changwoo">
               <div class="speech"></div>
@@ -142,8 +142,8 @@
             <button class="artifact-tab active" data-artifact="log">Log</button>
             <button class="artifact-tab" data-artifact="brief">Brief</button>
             <button class="artifact-tab" data-artifact="plan">Plan</button>
-            <button class="artifact-tab" data-artifact="design">Design</button>
-            <button class="artifact-tab" data-artifact="dev">Dev</button>
+            <button class="artifact-tab" data-artifact="design">UX</button>
+            <button class="artifact-tab" data-artifact="dev">Prompt</button>
             <button class="artifact-tab" data-artifact="final">Final</button>
           </div>
           <pre id="artifactOutput">아직 실행 전입니다.</pre>
