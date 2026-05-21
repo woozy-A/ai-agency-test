@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+import time
 import traceback
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -119,18 +120,29 @@ def ask_gemini_agent(agent_name: str, role_prompt: str, user_prompt: str, model:
         method="POST",
     )
 
-    try:
-        with urlopen(request, timeout=120) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace")
-        if exc.code == 429:
-            raise RuntimeError(
-                "Gemini 무료 할당량 또는 분당 제한에 걸렸습니다. 잠시 후 다시 시도하거나, "
-                ".env의 GEMINI_MODEL을 다른 무료 지원 모델로 바꿔보세요. "
-                "자세한 원문 오류: " + error_body
-            ) from exc
-        raise RuntimeError(f"Gemini API 오류 {exc.code}: {error_body}") from exc
+    for attempt in range(2):
+        try:
+            with urlopen(request, timeout=120) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            break
+        except HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            if exc.code == 503 and attempt == 0:
+                time.sleep(4)
+                continue
+            if exc.code == 429:
+                raise RuntimeError(
+                    "Gemini 무료 할당량 또는 분당 제한에 걸렸습니다. 잠시 후 다시 시도하거나, "
+                    ".env의 GEMINI_MODEL을 다른 무료 지원 모델로 바꿔보세요. "
+                    "자세한 원문 오류: " + error_body
+                ) from exc
+            if exc.code == 503:
+                raise RuntimeError(
+                    "Gemini 모델 서버가 현재 혼잡합니다. 잠시 후 다시 시도하거나 "
+                    ".env에서 AI_PIPELINE_MODE=one_call 및 GEMINI_MODEL=gemini-2.5-flash-lite 설정을 사용하세요. "
+                    "원문 오류: " + error_body
+                ) from exc
+            raise RuntimeError(f"Gemini API 오류 {exc.code}: {error_body}") from exc
 
     candidates = data.get("candidates", [])
     if not candidates:
