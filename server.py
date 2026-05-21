@@ -46,6 +46,16 @@ def get_model() -> str:
     raise RuntimeError(f"지원하지 않는 AI_PROVIDER입니다: {provider}")
 
 
+def get_agent_model(agent_key: str) -> str:
+    env_key = f"{agent_key.upper()}_MODEL"
+    return os.getenv(env_key, get_model())
+
+
+def get_pipeline_mode() -> str:
+    load_env()
+    return os.getenv("AI_PIPELINE_MODE", "one_call").strip().lower()
+
+
 def require_openai_client():
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError(
@@ -60,9 +70,9 @@ def require_openai_client():
     return OpenAI()
 
 
-def ask_openai_agent(client, agent_name: str, role_prompt: str, user_prompt: str) -> str:
+def ask_openai_agent(client, agent_name: str, role_prompt: str, user_prompt: str, model: str) -> str:
     response = client.responses.create(
-        model=get_model(),
+        model=model,
         input=[
             {
                 "role": "system",
@@ -80,14 +90,13 @@ def ask_openai_agent(client, agent_name: str, role_prompt: str, user_prompt: str
     return text
 
 
-def ask_gemini_agent(agent_name: str, role_prompt: str, user_prompt: str) -> str:
+def ask_gemini_agent(agent_name: str, role_prompt: str, user_prompt: str, model: str) -> str:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError(
             "GEMINI_API_KEY가 없습니다. Google AI Studio에서 무료 API 키를 만든 뒤 .env에 GEMINI_API_KEY=... 를 넣어주세요."
         )
 
-    model = get_model()
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     payload = {
         "systemInstruction": {
@@ -134,12 +143,13 @@ def ask_gemini_agent(agent_name: str, role_prompt: str, user_prompt: str) -> str
     return text
 
 
-def ask_agent(client, agent_name: str, role_prompt: str, user_prompt: str) -> str:
+def ask_agent(client, agent_name: str, role_prompt: str, user_prompt: str, model: str | None = None) -> str:
     provider = get_provider()
+    model = model or get_model()
     if provider == "openai":
-        return ask_openai_agent(client, agent_name, role_prompt, user_prompt)
+        return ask_openai_agent(client, agent_name, role_prompt, user_prompt, model)
     if provider == "gemini":
-        return ask_gemini_agent(agent_name, role_prompt, user_prompt)
+        return ask_gemini_agent(agent_name, role_prompt, user_prompt, model)
     raise RuntimeError(f"지원하지 않는 AI_PROVIDER입니다: {provider}")
 
 
@@ -191,10 +201,7 @@ def save_run(request: str, artifacts: dict[str, str]) -> Path:
     return output_dir
 
 
-def run_ai_pipeline(request: str) -> dict:
-    provider = get_provider()
-    client = require_openai_client() if provider == "openai" else None
-
+def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], int, str]:
     role_prompt = (
         "너는 작은 AI 에이전시 전체를 한 번에 시뮬레이션하는 오케스트레이터다. "
         "실제로는 API 호출을 한 번만 사용하지만, 결과는 Mike PM, Mina Designer, Jay Developer, "
@@ -220,15 +227,111 @@ def run_ai_pipeline(request: str) -> dict:
 요청이 '투두리스트 앱 만들어줘'처럼 쉬운 앱이면 final에는 실제로 만들 파일 구성과 핵심 HTML/CSS/JS 예시까지 포함해줘.
 """
 
-    raw = ask_agent(client, "Agency Orchestrator", role_prompt, user_prompt)
+    model = get_model()
+    raw = ask_agent(client, "Agency Orchestrator", role_prompt, user_prompt, model)
     artifacts = normalize_artifacts(extract_json_object(raw))
+    return artifacts, 1, model
+
+
+def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], int, str]:
+    mike_role = (
+        "너는 AI 에이전시의 PM Mike다. 창우 사장의 요청을 실행 가능한 brief와 plan으로 바꾼다. "
+        "답변은 한국어로 작성하고, 실무자가 바로 이어받을 수 있게 구체적으로 쓴다."
+    )
+    mina_role = (
+        "너는 AI 에이전시의 디자이너 Mina다. Mike의 brief와 plan을 보고 화면 구조, 사용자 흐름, "
+        "콘텐츠 배치를 설계한다. 한국어로 간결하지만 구체적으로 작성한다."
+    )
+    jay_role = (
+        "너는 AI 에이전시의 개발자 Jay다. Mike의 plan과 Mina의 디자인을 바탕으로 구현 방법, 파일 구조, "
+        "핵심 코드 방향을 작성한다. 쉬운 앱 요청이면 실제 HTML/CSS/JS 예시도 포함한다."
+    )
+    yuna_role = (
+        "너는 AI 에이전시의 리뷰어 Yuna다. brief, design, dev 결과를 검토하고 누락, 위험, 개선사항을 찾는다. "
+        "실행 가능한 피드백만 한국어로 작성한다."
+    )
+    final_role = (
+        "너는 최종 납품 편집자다. 앞 단계 산출물과 리뷰를 반영해 창우가 바로 이해할 수 있는 최종 결과물을 만든다. "
+        "다음 액션과 구현 요약을 명확히 쓴다."
+    )
+
+    mike_model = get_agent_model("mike")
+    mina_model = get_agent_model("mina")
+    jay_model = get_agent_model("jay")
+    yuna_model = get_agent_model("yuna")
+    final_model = get_agent_model("final")
+
+    brief = ask_agent(
+        client,
+        "Mike",
+        mike_role,
+        f"창우의 요청:\n{request}\n\n1) brief\n2) 작업 계획\n3) Mina/Jay/Yuna에게 줄 지시를 작성해줘.",
+        mike_model,
+    )
+    design = ask_agent(
+        client,
+        "Mina",
+        mina_role,
+        f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\n디자인/UX/콘텐츠 구조를 제안해줘.",
+        mina_model,
+    )
+    dev = ask_agent(
+        client,
+        "Jay",
+        jay_role,
+        f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\nMina 결과:\n{design}\n\n구현 계획과 핵심 코드 방향을 작성해줘.",
+        jay_model,
+    )
+    review = ask_agent(
+        client,
+        "Yuna",
+        yuna_role,
+        f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\n검토 결과를 작성해줘.",
+        yuna_model,
+    )
+    final = ask_agent(
+        client,
+        "Finalizer",
+        final_role,
+        f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\nYuna review:\n{review}\n\n최종 결과물을 작성해줘.",
+        final_model,
+    )
+
+    artifacts = {
+        "brief": brief,
+        "plan": brief,
+        "design": design,
+        "dev": dev,
+        "review": review,
+        "final": final,
+    }
+    models = (
+        f"Mike={mike_model}, Mina={mina_model}, Jay={jay_model}, "
+        f"Yuna={yuna_model}, Finalizer={final_model}"
+    )
+    return artifacts, 5, models
+
+
+def run_ai_pipeline(request: str) -> dict:
+    provider = get_provider()
+    client = require_openai_client() if provider == "openai" else None
+    mode = get_pipeline_mode()
+
+    if mode == "multi":
+        artifacts, calls, model_summary = run_multi_agent_pipeline(client, request)
+    elif mode == "one_call":
+        artifacts, calls, model_summary = run_one_call_pipeline(client, request)
+    else:
+        raise RuntimeError("AI_PIPELINE_MODE는 one_call 또는 multi 여야 합니다.")
+
     output_dir = save_run(request, artifacts)
 
     return {
         "ok": True,
         "provider": provider,
-        "model": get_model(),
-        "calls": 1,
+        "model": model_summary,
+        "mode": mode,
+        "calls": calls,
         "output_dir": str(output_dir),
         "artifacts": artifacts,
     }

@@ -45,8 +45,9 @@ Then edit `.env` and set your API key. The default provider is Gemini because it
 
 ```text
 AI_PROVIDER=gemini
+AI_PIPELINE_MODE=one_call
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL=gemini-2.5-flash-lite
 ```
 
 Gemini mode uses Python's standard library, so no package install is required.
@@ -83,6 +84,23 @@ The local backend uses one AI request per run. The single response is split into
 - Final delivery
 
 This keeps the learning version cheaper than calling one model per agent.
+
+To run each worker with its own model, use multi-agent mode:
+
+```text
+AI_PROVIDER=gemini
+AI_PIPELINE_MODE=multi
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.5-flash-lite
+
+MIKE_MODEL=gemini-2.5-flash
+MINA_MODEL=gemini-2.5-flash-lite
+JAY_MODEL=gemini-2.5-flash
+YUNA_MODEL=gemini-2.5-flash
+FINAL_MODEL=gemini-2.5-flash-lite
+```
+
+Multi-agent mode is easier to understand, but it uses five API calls per run.
 
 ## Code Demo
 

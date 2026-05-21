@@ -244,7 +244,8 @@ async function runOffice() {
     try {
       backendResult = await runBackendPipeline(request);
       pendingArtifacts = backendResult.artifacts;
-      addLog(`AI pipeline completed with ${backendResult.provider}/${backendResult.model}`);
+      addLog(`AI pipeline completed with ${backendResult.provider}/${backendResult.mode || "one_call"}`);
+      addLog(`모델: ${backendResult.model}`);
       addLog(`실제 API 호출 수: ${backendResult.calls || 1}`);
       addLog(`결과 저장 위치: ${backendResult.output_dir}`);
     } catch (error) {
