@@ -248,6 +248,9 @@ async function runOffice() {
       addLog(`모델: ${backendResult.model}`);
       addLog(`실제 API 호출 수: ${backendResult.calls || 1}`);
       addLog(`결과 저장 위치: ${backendResult.output_dir}`);
+      if (backendResult.files && backendResult.files.length) {
+        addLog(`생성 파일: ${backendResult.files.join(", ")}`);
+      }
     } catch (error) {
       artifacts.log = logs.concat([`ERROR. ${error.message}`]).join("\n");
       activeArtifact = "log";

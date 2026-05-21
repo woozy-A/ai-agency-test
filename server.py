@@ -181,7 +181,7 @@ def extract_json_object(text: str) -> dict:
         raise
 
 
-def normalize_artifacts(data: dict) -> dict[str, str]:
+def normalize_artifacts(data: dict) -> tuple[dict[str, str], list[dict[str, str]]]:
     required = ["brief", "plan", "design", "dev", "review", "final"]
     artifacts = {}
     for key in required:
@@ -190,7 +190,18 @@ def normalize_artifacts(data: dict) -> dict[str, str]:
             value = json.dumps(value, ensure_ascii=False, indent=2)
         value = str(value).strip()
         artifacts[key] = value or f"{key} 결과가 비어 있습니다."
-    return artifacts
+    files = data.get("files", [])
+    if not isinstance(files, list):
+        files = []
+    clean_files = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path", "")).strip().lstrip("/").replace("..", "")
+        content = str(item.get("content", ""))
+        if path and content:
+            clean_files.append({"path": path, "content": content})
+    return artifacts, clean_files
 
 
 def slugify(text: str) -> str:
@@ -198,7 +209,7 @@ def slugify(text: str) -> str:
     return slug[:40] or "request"
 
 
-def save_run(request: str, artifacts: dict[str, str]) -> Path:
+def save_run(request: str, artifacts: dict[str, str], files: list[dict[str, str]] | None = None) -> Path:
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_dir = OUTPUTS / f"{run_id}-{slugify(request)}"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -210,15 +221,21 @@ def save_run(request: str, artifacts: dict[str, str]) -> Path:
         extension = "json" if key == "brief" else "md"
         (output_dir / f"{key}.{extension}").write_text(value, encoding="utf-8")
 
+    for item in files or []:
+        file_path = output_dir / item["path"]
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(item["content"], encoding="utf-8")
+
     return output_dir
 
 
-def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], int, str]:
+def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
     role_prompt = (
-        "너는 작은 AI 에이전시 전체를 한 번에 시뮬레이션하는 오케스트레이터다. "
+        "너는 작은 AI 에이전시 전체를 한 번에 실행하는 오케스트레이터다. "
         "실제로는 API 호출을 한 번만 사용하지만, 결과는 Mike PM, Mina Designer, Jay Developer, "
         "Yuna Reviewer, Finalizer가 각각 일한 것처럼 나눠서 작성한다. "
-        "학습용 자동화 파이프라인이므로 과하게 길게 쓰지 말고, 실행 가능한 수준으로 구체화한다. "
+        "창우는 계획서가 아니라 바로 열어볼 수 있는 결과물을 원한다. "
+        "쉬운 웹앱 요청이면 반드시 실행 가능한 파일을 생성한다. "
         "반드시 순수 JSON 객체만 반환한다. 마크다운 코드블록을 쓰지 않는다."
     )
     user_prompt = f"""
@@ -228,24 +245,42 @@ def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], int, st
 다음 JSON 키를 모두 포함해서 한국어로 작성해줘.
 
 {{
-  "brief": "Mike PM이 정리한 목표, 대상, 산출물, 제약조건",
-  "plan": "Mike PM의 단계별 실행 계획",
+  "brief": "Mike PM이 5줄 이내로 정리한 목표와 산출물",
+  "plan": "오늘 바로 끝내는 3~5단계 실행 계획. 몇 주짜리 일정 금지",
   "design": "Mina Designer의 화면/UX/콘텐츠 구조 제안",
-  "dev": "Jay Developer의 구현 방법, 파일 구조, 필요한 코드 방향",
-  "review": "Yuna Reviewer의 누락/위험/개선사항 검토",
-  "final": "창우에게 납품할 최종 결과와 다음 액션"
+  "dev": "Jay Developer의 구현 요약과 파일 설명",
+  "review": "Yuna Reviewer의 짧은 검토와 수정 반영 내역",
+  "final": "창우에게 납품하는 최종 요약. 생성된 파일을 어떻게 열면 되는지 설명",
+  "files": [
+    {{"path": "generated_app/index.html", "content": "완성된 HTML"}},
+    {{"path": "generated_app/style.css", "content": "완성된 CSS"}},
+    {{"path": "generated_app/app.js", "content": "완성된 JavaScript"}}
+  ]
 }}
 
-요청이 '투두리스트 앱 만들어줘'처럼 쉬운 앱이면 final에는 실제로 만들 파일 구성과 핵심 HTML/CSS/JS 예시까지 포함해줘.
+규칙:
+- 요청이 앱/웹페이지/도구 제작이면 files에 실제 실행 가능한 파일을 넣어라.
+- 투두리스트 앱은 할 일 추가, 완료 체크, 삭제, 남은 개수 표시, localStorage 저장을 구현해라.
+- React/Tailwind 설치가 필요한 형태보다, 처음에는 브라우저에서 바로 열리는 순수 HTML/CSS/JS를 우선한다.
+- 3주 계획, 회의 일정, 장기 마일스톤을 쓰지 마라.
+- 파일 content에는 설명이 아니라 실제 코드만 넣어라.
 """
 
     model = get_model()
     raw = ask_agent(client, "Agency Orchestrator", role_prompt, user_prompt, model)
-    artifacts = normalize_artifacts(extract_json_object(raw))
-    return artifacts, 1, model
+    artifacts, files = normalize_artifacts(extract_json_object(raw))
+    if files:
+        file_list = "\n".join(f"- `{item['path']}`" for item in files)
+        artifacts["final"] = (
+            artifacts["final"].rstrip()
+            + "\n\n## 생성된 파일\n\n"
+            + file_list
+            + "\n\n`generated_app/index.html`을 브라우저로 열면 결과물을 볼 수 있습니다."
+        )
+    return artifacts, files, 1, model
 
 
-def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], int, str]:
+def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
     mike_role = (
         "너는 AI 에이전시의 PM Mike다. 창우 사장의 요청을 실행 가능한 brief와 plan으로 바꾼다. "
         "답변은 한국어로 작성하고, 실무자가 바로 이어받을 수 있게 구체적으로 쓴다."
@@ -321,7 +356,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], int,
         f"Mike={mike_model}, Mina={mina_model}, Jay={jay_model}, "
         f"Yuna={yuna_model}, Finalizer={final_model}"
     )
-    return artifacts, 5, models
+    return artifacts, [], 5, models
 
 
 def run_ai_pipeline(request: str) -> dict:
@@ -330,13 +365,13 @@ def run_ai_pipeline(request: str) -> dict:
     mode = get_pipeline_mode()
 
     if mode == "multi":
-        artifacts, calls, model_summary = run_multi_agent_pipeline(client, request)
+        artifacts, files, calls, model_summary = run_multi_agent_pipeline(client, request)
     elif mode == "one_call":
-        artifacts, calls, model_summary = run_one_call_pipeline(client, request)
+        artifacts, files, calls, model_summary = run_one_call_pipeline(client, request)
     else:
         raise RuntimeError("AI_PIPELINE_MODE는 one_call 또는 multi 여야 합니다.")
 
-    output_dir = save_run(request, artifacts)
+    output_dir = save_run(request, artifacts, files)
 
     return {
         "ok": True,
@@ -345,6 +380,7 @@ def run_ai_pipeline(request: str) -> dict:
         "mode": mode,
         "calls": calls,
         "output_dir": str(output_dir),
+        "files": [item["path"] for item in files],
         "artifacts": artifacts,
     }
 
