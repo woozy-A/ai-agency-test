@@ -29,6 +29,7 @@ def load_env() -> None:
     if not env_path.exists():
         return
 
+    file_values = {}
     for raw_line in env_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -36,6 +37,9 @@ def load_env() -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip().strip('"').strip("'")
+        file_values[key] = value
+
+    for key, value in file_values.items():
         os.environ.setdefault(key, value)
 
 
@@ -590,24 +594,24 @@ Codex 작업 설계 규칙:
 
 def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
     mike_role = (
-        "너는 AI 에이전시의 PM Mike다. 창우 사장의 요청을 실행 가능한 brief와 plan으로 바꾼다. "
-        "답변은 한국어로 작성하고, 실무자가 바로 이어받을 수 있게 구체적으로 쓴다."
+        "너는 Changwoo Prompt Agency의 PM/기획 Mike다. 창우 사장의 요청을 요구사항, 구현 범위, "
+        "하지 않을 일, 성공 기준으로 정리한다. 답변은 한국어로 쓰고 Codex가 이어받기 쉽게 구체적으로 쓴다."
     )
     mina_role = (
-        "너는 AI 에이전시의 디자이너 Mina다. Mike의 brief와 plan을 보고 화면 구조, 사용자 흐름, "
-        "콘텐츠 배치를 설계한다. 한국어로 간결하지만 구체적으로 작성한다."
+        "너는 Changwoo Prompt Agency의 기획 보조 Mina다. Mike의 범위를 보고 사용자 흐름, 화면/파일 구조, "
+        "산출물 형태를 정리한다. 최종 Codex 프롬프트에 들어갈 구조만 간결하게 제안한다."
     )
     jay_role = (
-        "너는 AI 에이전시의 개발자 Jay다. Mike의 plan과 Mina의 디자인을 바탕으로 구현 방법, 파일 구조, "
-        "핵심 코드 방향을 작성한다. 쉬운 앱 요청이면 실제 HTML/CSS/JS 예시도 포함한다."
+        "너는 Changwoo Prompt Agency의 Dev/구현안 Jay다. Mike와 Mina의 내용을 바탕으로 Codex가 수정할 "
+        "파일, 코드 구조, 명령어, 테스트 전략을 제안한다. Swift, 웹, 로컬 서버 같은 프로젝트 타입별 차이를 구분한다."
     )
     yuna_role = (
-        "너는 AI 에이전시의 리뷰어 Yuna다. brief, design, dev 결과를 검토하고 누락, 위험, 개선사항을 찾는다. "
-        "실행 가능한 피드백만 한국어로 작성한다."
+        "너는 Changwoo Prompt Agency의 QA/비판 Yuna다. brief, structure, dev 결과에서 버그, 성능, 예외 케이스, "
+        "모호한 요구사항을 찾는다. 칭찬보다 실패 가능성과 검증 방법을 우선한다."
     )
     final_role = (
-        "너는 최종 납품 편집자다. 앞 단계 산출물과 리뷰를 반영해 창우가 바로 이해할 수 있는 최종 결과물을 만든다. "
-        "다음 액션과 구현 요약을 명확히 쓴다."
+        "너는 Final Editor다. 앞 단계 산출물을 압축해서 창우가 Codex에 그대로 붙여넣을 수 있는 최종 프롬프트로 만든다. "
+        "반드시 다음 섹션을 포함한다: 목표, 작업 범위, 구현 지시, 테스트/검수 기준, 위험 항목, 완료 보고 형식."
     )
 
     mike_provider = get_agent_provider("mike")
@@ -625,7 +629,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         client,
         "Mike",
         mike_role,
-        f"창우의 요청:\n{request}\n\n1) brief\n2) 작업 계획\n3) Mina/Jay/Yuna에게 줄 지시를 작성해줘.",
+        f"창우의 요청:\n{request}\n\n1) 요구사항\n2) 구현 범위\n3) 성공 기준\n4) Jay/Yuna가 봐야 할 쟁점을 작성해줘.",
         mike_model,
         mike_provider,
     )
@@ -633,7 +637,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         client,
         "Mina",
         mina_role,
-        f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\n디자인/UX/콘텐츠 구조를 제안해줘.",
+        f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\nCodex 프롬프트에 들어갈 사용자 흐름, 화면/파일 구조, 산출물 형태를 제안해줘.",
         mina_model,
         mina_provider,
     )
@@ -641,7 +645,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         client,
         "Jay",
         jay_role,
-        f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\nMina 결과:\n{design}\n\n구현 계획과 핵심 코드 방향을 작성해줘.",
+        f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\nMina 결과:\n{design}\n\nCodex가 실제 코드 작성/수정에 착수할 수 있도록 구현안, 파일 구조, 명령어, 테스트 전략을 작성해줘.",
         jay_model,
         jay_provider,
     )
@@ -649,7 +653,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         client,
         "Yuna",
         yuna_role,
-        f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\n검토 결과를 작성해줘.",
+        f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\n버그, 성능, 예외 케이스, 누락된 검증을 중심으로 비판해줘.",
         yuna_model,
         yuna_provider,
     )
@@ -657,7 +661,8 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         client,
         "Finalizer",
         final_role,
-        f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\nYuna review:\n{review}\n\n최종 결과물을 작성해줘.",
+        f"원 요청:\n{request}\n\nPM/기획 Mike:\n{brief}\n\n구조 정리 Mina:\n{design}\n\nDev/구현안 Jay:\n{dev}\n\nQA/비판 Yuna:\n{review}\n\n"
+        "이 내용을 하나의 Codex용 최종 프롬프트로 압축해줘. 설명문이 아니라, 바로 붙여넣어 실행할 지시문이어야 한다.",
         final_model,
         final_provider,
     )
