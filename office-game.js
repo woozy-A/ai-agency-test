@@ -134,24 +134,26 @@ function createSimulationArtifacts(request) {
       "# Mike's Plan",
       "",
       "1. 창우의 요청을 brief로 정리한다.",
-      "2. 디자이너 Mina와 개발자 Jay를 불러 산출물 방향을 맞춘다.",
-      "3. Mina는 고객이 보는 구조를 만든다.",
-      "4. Jay는 자동화 실행 흐름과 결과 저장을 만든다.",
-      "5. Yuna가 품질 기준으로 검토한다.",
+      "2. 화면에 필요한 기능을 최소 단위로 나눈다.",
+      "3. Mina는 입력창, 목록, 완료 상태, 카운터 구조를 잡는다.",
+      "4. Jay는 HTML/CSS/JS 단일 파일 구현 방향을 만든다.",
+      "5. Yuna가 기본 사용 흐름과 예외 상황을 검토한다.",
     ].join("\n"),
     design: [
       "# Mina's Design Notes",
       "",
-      "- 첫 화면에서 핵심 제안을 바로 보여준다.",
-      "- 요청, 초안, 검토, 최종본을 탭으로 분리한다.",
-      "- 사장/PM/실무자 역할이 눈에 보이게 배치한다.",
+      "- 상단에는 할 일 입력창과 추가 버튼을 둔다.",
+      "- 중앙에는 체크 가능한 할 일 목록을 둔다.",
+      "- 하단에는 남은 할 일 개수와 전체 삭제 버튼을 둔다.",
+      "- 완료된 항목은 취소선과 옅은 색으로 구분한다.",
     ].join("\n"),
     dev: [
       "# Jay's Build Notes",
       "",
-      "- 입력값을 request artifact로 저장한다.",
-      "- 각 agent step을 순서대로 실행한다.",
-      "- 로컬 서버 버전에서는 이 step들이 실제 AI API 호출로 바뀐다.",
+      "- `todo.html` 하나로 HTML/CSS/JS를 넣어 시작할 수 있다.",
+      "- `todos` 배열에 `{ id, text, done }` 형태로 상태를 저장한다.",
+      "- 추가, 체크 토글, 삭제 함수만 먼저 구현한다.",
+      "- 나중에 `localStorage` 저장을 붙이면 새로고침 후에도 유지된다.",
     ].join("\n"),
     review: [
       "# Yuna's Review",
@@ -165,11 +167,14 @@ function createSimulationArtifacts(request) {
       "",
       `요청: ${request}`,
       "",
-      "완성된 흐름:",
-      "창우 지시 -> Mike 기획 -> Mina 디자인 -> Jay 구현 -> Yuna 검토 -> 납품",
+      "투두리스트 앱 최소 기능:",
+      "- 할 일 추가",
+      "- 완료 체크",
+      "- 삭제",
+      "- 남은 개수 표시",
       "",
       "로컬 실행판:",
-      "`python3 server.py`로 열면 실제 AI API를 호출한다.",
+      "`python3 server.py`로 열면 실제 AI가 한 번의 호출로 Mike/Mina/Jay/Yuna/Final 결과를 만든다.",
     ].join("\n"),
   };
 }
@@ -240,6 +245,7 @@ async function runOffice() {
       backendResult = await runBackendPipeline(request);
       pendingArtifacts = backendResult.artifacts;
       addLog(`AI pipeline completed with ${backendResult.provider}/${backendResult.model}`);
+      addLog(`실제 API 호출 수: ${backendResult.calls || 1}`);
       addLog(`결과 저장 위치: ${backendResult.output_dir}`);
     } catch (error) {
       artifacts.log = logs.concat([`ERROR. ${error.message}`]).join("\n");

@@ -73,6 +73,17 @@ http://localhost:8000/office-game.html
 
 When opened through `localhost`, the pixel office calls the backend and runs the AI agent pipeline. When opened on GitHub Pages, it stays in simulation mode so the public demo still works.
 
+The local backend uses one AI request per run. The single response is split into:
+
+- Mike PM brief
+- Mike plan
+- Mina design notes
+- Jay build notes
+- Yuna review
+- Final delivery
+
+This keeps the learning version cheaper than calling one model per agent.
+
 ## Code Demo
 
 Run the local Python sample:

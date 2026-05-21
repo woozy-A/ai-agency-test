@@ -143,6 +143,34 @@ def ask_agent(client, agent_name: str, role_prompt: str, user_prompt: str) -> st
     raise RuntimeError(f"지원하지 않는 AI_PROVIDER입니다: {provider}")
 
 
+def extract_json_object(text: str) -> dict:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(cleaned[start : end + 1])
+        raise
+
+
+def normalize_artifacts(data: dict) -> dict[str, str]:
+    required = ["brief", "plan", "design", "dev", "review", "final"]
+    artifacts = {}
+    for key in required:
+        value = data.get(key, "")
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value, ensure_ascii=False, indent=2)
+        value = str(value).strip()
+        artifacts[key] = value or f"{key} 결과가 비어 있습니다."
+    return artifacts
+
+
 def slugify(text: str) -> str:
     slug = re.sub(r"[^0-9A-Za-z가-힣]+", "-", text).strip("-")
     return slug[:40] or "request"
@@ -167,72 +195,40 @@ def run_ai_pipeline(request: str) -> dict:
     provider = get_provider()
     client = require_openai_client() if provider == "openai" else None
 
-    mike_role = (
-        "너는 AI 에이전시의 PM Mike다. 창우 사장의 요청을 실행 가능한 brief와 작업 계획으로 바꾼다. "
-        "답변은 한국어로, 실무자가 바로 이어받을 수 있게 구체적으로 작성한다."
+    role_prompt = (
+        "너는 작은 AI 에이전시 전체를 한 번에 시뮬레이션하는 오케스트레이터다. "
+        "실제로는 API 호출을 한 번만 사용하지만, 결과는 Mike PM, Mina Designer, Jay Developer, "
+        "Yuna Reviewer, Finalizer가 각각 일한 것처럼 나눠서 작성한다. "
+        "학습용 자동화 파이프라인이므로 과하게 길게 쓰지 말고, 실행 가능한 수준으로 구체화한다. "
+        "반드시 순수 JSON 객체만 반환한다. 마크다운 코드블록을 쓰지 않는다."
     )
-    mina_role = (
-        "너는 AI 에이전시의 디자이너 Mina다. PM의 brief와 plan을 보고 사용자가 볼 화면, 콘텐츠 구조, "
-        "메시지 흐름을 설계한다. 한국어로 간결하지만 구체적으로 작성한다."
-    )
-    jay_role = (
-        "너는 AI 에이전시의 개발자 Jay다. PM의 plan과 디자이너의 제안을 보고 실제 구현/자동화 관점에서 "
-        "필요한 구조, 데이터 흐름, 다음 코드 작업을 정리한다. 한국어로 작성한다."
-    )
-    yuna_role = (
-        "너는 AI 에이전시의 리뷰어 Yuna다. brief, design, dev 결과를 검토하고 누락, 위험, 개선안을 찾는다. "
-        "날카롭지만 실행 가능하게 한국어로 작성한다."
-    )
-    final_role = (
-        "너는 최종 납품 편집자다. 앞 단계 산출물과 리뷰를 반영해 창우가 바로 이해할 수 있는 최종 결과물을 만든다. "
-        "한국어로 작성하고 다음 액션을 명확히 적는다."
-    )
+    user_prompt = f"""
+창우 사장의 요청:
+{request}
 
-    brief = ask_agent(
-        client,
-        "Mike",
-        mike_role,
-        f"창우의 요청:\n{request}\n\n1) brief\n2) 작업 계획\n3) 각 팀원에게 줄 지시를 작성해줘.",
-    )
-    design = ask_agent(
-        client,
-        "Mina",
-        mina_role,
-        f"원 요청:\n{request}\n\nMike의 brief/plan:\n{brief}\n\n디자인/콘텐츠 구조를 제안해줘.",
-    )
-    dev = ask_agent(
-        client,
-        "Jay",
-        jay_role,
-        f"원 요청:\n{request}\n\nMike의 brief/plan:\n{brief}\n\nMina의 디자인 제안:\n{design}\n\n구현 계획을 작성해줘.",
-    )
-    review = ask_agent(
-        client,
-        "Yuna",
-        yuna_role,
-        f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\n검토 결과를 작성해줘.",
-    )
-    final = ask_agent(
-        client,
-        "Finalizer",
-        final_role,
-        f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\nYuna review:\n{review}\n\n최종 결과물을 작성해줘.",
-    )
+다음 JSON 키를 모두 포함해서 한국어로 작성해줘.
 
-    artifacts = {
-      "brief": brief,
-      "plan": brief,
-      "design": design,
-      "dev": dev,
-      "review": review,
-      "final": final,
-    }
+{{
+  "brief": "Mike PM이 정리한 목표, 대상, 산출물, 제약조건",
+  "plan": "Mike PM의 단계별 실행 계획",
+  "design": "Mina Designer의 화면/UX/콘텐츠 구조 제안",
+  "dev": "Jay Developer의 구현 방법, 파일 구조, 필요한 코드 방향",
+  "review": "Yuna Reviewer의 누락/위험/개선사항 검토",
+  "final": "창우에게 납품할 최종 결과와 다음 액션"
+}}
+
+요청이 '투두리스트 앱 만들어줘'처럼 쉬운 앱이면 final에는 실제로 만들 파일 구성과 핵심 HTML/CSS/JS 예시까지 포함해줘.
+"""
+
+    raw = ask_agent(client, "Agency Orchestrator", role_prompt, user_prompt)
+    artifacts = normalize_artifacts(extract_json_object(raw))
     output_dir = save_run(request, artifacts)
 
     return {
         "ok": True,
         "provider": provider,
         "model": get_model(),
+        "calls": 1,
         "output_dir": str(output_dir),
         "artifacts": artifacts,
     }
