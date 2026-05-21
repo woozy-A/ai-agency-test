@@ -1,21 +1,21 @@
 const positions = {
-  changwoo: { home: [16, 30], meeting: [46, 58], delivery: [82, 78] },
-  mike: { home: [47, 30], boss: [23, 31], meeting: [52, 58], design: [69, 34], dev: [31, 72], review: [67, 73], delivery: [78, 75] },
-  mina: { home: [78, 34], meeting: [58, 56], mike: [55, 42], work: [78, 34], delivery: [84, 73] },
-  jay: { home: [28, 74], meeting: [49, 68], mike: [49, 45], work: [28, 74], delivery: [73, 78] },
-  yuna: { home: [67, 75], meeting: [58, 68], work: [67, 75], delivery: [88, 68] },
-  nora: { home: [37, 72], meeting: [45, 62], review: [61, 69], delivery: [80, 69] },
-  dana: { home: [22, 68], meeting: [47, 63], review: [64, 69], delivery: [76, 80] },
-  testkim: { home: [74, 70], meeting: [55, 66], review: [71, 68], delivery: [86, 79] },
-  jason: { home: [72, 80], meeting: [61, 66], review: [77, 68], delivery: [89, 72] },
-  sana: { home: [63, 80], meeting: [58, 72], review: [82, 67], delivery: [86, 62] },
-  iris: { home: [43, 23], meeting: [51, 53], review: [74, 76], delivery: [79, 83] },
-  vera: { home: [54, 23], meeting: [54, 53], review: [69, 80], delivery: [83, 84] },
+  changwoo: { home: [14, 20], meeting: [46, 50], delivery: [73, 81] },
+  mike: { home: [38, 20], boss: [22, 20], meeting: [48, 50], design: [73, 24], dev: [24, 67], review: [64, 69], delivery: [76, 75] },
+  mina: { home: [83, 22], meeting: [53, 50], mike: [54, 38], work: [83, 22], delivery: [81, 75] },
+  jay: { home: [16, 70], meeting: [45, 58], mike: [47, 39], work: [16, 70], delivery: [71, 75] },
+  yuna: { home: [61, 72], meeting: [54, 58], work: [61, 72], delivery: [86, 72] },
+  nora: { home: [45, 20], meeting: [43, 55], review: [59, 70], delivery: [78, 68] },
+  dana: { home: [32, 80], meeting: [47, 58], review: [66, 70], delivery: [70, 82] },
+  testkim: { home: [75, 70], meeting: [55, 60], review: [72, 70], delivery: [88, 82] },
+  jason: { home: [86, 70], meeting: [59, 60], review: [80, 70], delivery: [91, 73] },
+  sana: { home: [88, 82], meeting: [62, 58], review: [88, 66], delivery: [89, 62] },
+  iris: { home: [59, 20], meeting: [50, 45], review: [68, 82], delivery: [76, 86] },
+  vera: { home: [67, 20], meeting: [54, 45], review: [62, 82], delivery: [82, 86] },
   hallway: {
-    boss: [30, 42],
-    center: [52, 45],
-    lower: [52, 70],
-    delivery: [74, 70],
+    boss: [27, 34],
+    center: [52, 39],
+    lower: [52, 64],
+    delivery: [75, 67],
   },
 };
 
@@ -42,6 +42,8 @@ const els = {
   taskText: document.querySelector("#taskText"),
   artifactOutput: document.querySelector("#artifactOutput"),
   artifactCount: document.querySelector("#artifactCount"),
+  artifactPanel: document.querySelector("#artifactPanel"),
+  artifactToggle: document.querySelector("#artifactToggle"),
   deliveryBox: document.querySelector("#deliveryBox"),
   tabs: Array.from(document.querySelectorAll(".artifact-tab")),
   papers: {
@@ -236,6 +238,12 @@ function renderArtifact() {
   });
 }
 
+function toggleArtifactPanel(forceOpen) {
+  const shouldOpen = typeof forceOpen === "boolean" ? forceOpen : !els.artifactPanel.classList.contains("open");
+  els.artifactPanel.classList.toggle("open", shouldOpen);
+  els.artifactToggle.setAttribute("aria-expanded", String(shouldOpen));
+}
+
 function showPaper(key) {
   if (els.papers[key]) els.papers[key].classList.add("visible");
 }
@@ -254,6 +262,7 @@ function resetOffice() {
   hideAllSpeech();
   setActiveAgent(null);
   setTask("Idle", "Waiting for request");
+  toggleArtifactPanel(false);
   updateArtifactCount();
   renderArtifact();
   els.startButton.disabled = false;
@@ -385,6 +394,7 @@ async function runOffice() {
 
   activeArtifact = "final";
   renderArtifact();
+  toggleArtifactPanel(true);
   setTask("Done", "Final delivery is ready");
   setActiveAgent(null);
   running = false;
@@ -398,6 +408,7 @@ els.tabs.forEach((tab) => {
   });
 });
 
+els.artifactToggle.addEventListener("click", () => toggleArtifactPanel());
 els.startButton.addEventListener("click", runOffice);
 els.resetButton.addEventListener("click", resetOffice);
 

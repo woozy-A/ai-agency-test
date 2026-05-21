@@ -52,9 +52,9 @@ textarea {
 
 .game-layout {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) 340px;
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: 14px;
-  max-width: 1500px;
+  max-width: 1740px;
   margin: 0 auto;
 }
 
@@ -233,7 +233,20 @@ button:disabled {
 }
 
 .artifact-panel {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  left: 18px;
+  z-index: 60;
   min-width: 0;
+  max-height: min(72vh, 720px);
+  overflow: hidden;
+  transform: translateY(calc(100% - 62px));
+  transition: transform 220ms steps(6);
+}
+
+.artifact-panel.open {
+  transform: translateY(0);
 }
 
 .hud {
@@ -270,7 +283,7 @@ button:disabled {
 .office-map {
   position: relative;
   width: 100%;
-  height: clamp(420px, 56vw, 640px);
+  height: clamp(620px, 56vw, 780px);
   overflow: hidden;
   border: 6px solid #15191f;
   background-color: var(--floor);
@@ -296,43 +309,51 @@ button:disabled {
 }
 
 .boss-room {
-  left: 3%;
-  top: 5%;
-  width: 25%;
-  height: 32%;
+  left: 2.5%;
+  top: 4%;
+  width: 22%;
+  height: 25%;
   background: var(--red-room);
 }
 
 .planning-room {
-  left: 32%;
-  top: 5%;
-  width: 28%;
-  height: 32%;
+  left: 27%;
+  top: 4%;
+  width: 25%;
+  height: 25%;
   background: var(--yellow-room);
 }
 
 .design-room {
-  right: 3%;
-  top: 5%;
-  width: 31%;
-  height: 39%;
+  right: 2.5%;
+  top: 4%;
+  width: 28%;
+  height: 31%;
   background: var(--blue-room);
 }
 
 .dev-room {
-  left: 3%;
-  bottom: 5%;
-  width: 43%;
-  height: 37%;
+  left: 2.5%;
+  bottom: 4%;
+  width: 38.5%;
+  height: 39%;
   background: var(--green-room);
 }
 
 .review-room {
-  right: 3%;
-  bottom: 5%;
-  width: 39%;
-  height: 37%;
+  right: 2.5%;
+  bottom: 4%;
+  width: 45%;
+  height: 39%;
   background: var(--purple-room);
+}
+
+.ops-room {
+  left: 54%;
+  top: 4%;
+  width: 13%;
+  height: 25%;
+  background: #6f8e78;
 }
 
 .desk,
@@ -365,35 +386,71 @@ button:disabled {
 
 .desk-boss {
   left: 8%;
-  top: 18%;
+  top: 15%;
 }
 
 .desk-pm {
-  left: 40%;
-  top: 18%;
+  left: 35%;
+  top: 15%;
 }
 
 .desk-design {
   right: 12%;
-  top: 23%;
+  top: 16%;
 }
 
 .desk-dev {
-  left: 21%;
-  bottom: 18%;
+  left: 13%;
+  bottom: 21%;
 }
 
 .desk-review {
-  right: 20%;
-  bottom: 18%;
+  right: 24%;
+  bottom: 21%;
+}
+
+.desk-scope {
+  left: 43%;
+  top: 15%;
+}
+
+.desk-dx {
+  left: 29%;
+  bottom: 10%;
+}
+
+.desk-qa {
+  right: 14%;
+  bottom: 21%;
+}
+
+.desk-redteam {
+  right: 5%;
+  bottom: 21%;
+}
+
+.desk-security {
+  right: 5%;
+  bottom: 9%;
+}
+
+.desk-editor {
+  left: 57%;
+  top: 15%;
+}
+
+.desk-judge {
+  right: 34%;
+  bottom: 10%;
 }
 
 .meeting-table {
   left: 45%;
-  top: 45%;
+  top: 43%;
   width: 126px;
   height: 74px;
   background: #9a5a2f;
+  z-index: 2;
 }
 
 .meeting-table::before {
@@ -407,7 +464,7 @@ button:disabled {
 }
 
 .delivery-box {
-  right: 6%;
+  right: 15%;
   bottom: 8%;
   display: grid;
   width: 72px;
@@ -443,23 +500,163 @@ button:disabled {
 }
 
 .request-paper {
-  left: 17%;
-  top: 17%;
+  left: 18%;
+  top: 14%;
 }
 
 .brief-paper {
-  left: 49%;
-  top: 19%;
+  left: 48%;
+  top: 14%;
 }
 
 .draft-paper {
-  left: 26%;
-  bottom: 17%;
+  left: 18%;
+  bottom: 20%;
 }
 
 .final-paper {
-  right: 9%;
+  right: 17%;
   bottom: 19%;
+}
+
+.rug,
+.bookshelf,
+.whiteboard,
+.sofa,
+.water-cooler,
+.plant {
+  position: absolute;
+  image-rendering: pixelated;
+}
+
+.rug {
+  left: 42%;
+  top: 39%;
+  width: 190px;
+  height: 124px;
+  border: 4px solid rgba(42, 31, 25, 0.75);
+  background:
+    linear-gradient(90deg, transparent 0 18px, rgba(255, 255, 255, 0.16) 18px 22px, transparent 22px),
+    #705a88;
+  opacity: 0.8;
+}
+
+.bookshelf {
+  width: 58px;
+  height: 92px;
+  border: 4px solid #2a1f19;
+  background:
+    linear-gradient(#5e351e 0 10px, transparent 10px 16px, #5e351e 16px 26px, transparent 26px 32px, #5e351e 32px 42px, transparent 42px),
+    linear-gradient(90deg, #d8c77d 0 10px, #5b77a7 10px 20px, #a85043 20px 30px, #8fb06f 30px 40px, #e0d7b8 40px 50px),
+    #8d532b;
+}
+
+.bookshelf-left {
+  left: 4%;
+  top: 49%;
+}
+
+.bookshelf-right {
+  right: 3.5%;
+  top: 39%;
+}
+
+.whiteboard {
+  left: 55%;
+  top: 31.5%;
+  display: grid;
+  width: 118px;
+  height: 62px;
+  place-items: center;
+  border: 4px solid #2a1f19;
+  background: #edf3ed;
+  color: #3b4a3d;
+  font-size: 13px;
+  font-weight: 900;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.2);
+}
+
+.sofa {
+  left: 67%;
+  top: 42%;
+  width: 112px;
+  height: 56px;
+  border: 4px solid #2a1f19;
+  background:
+    linear-gradient(90deg, #55759b 0 18px, transparent 18px 94px, #55759b 94px),
+    linear-gradient(#7192bc 0 34px, #55759b 34px);
+  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.2);
+}
+
+.water-cooler {
+  left: 26%;
+  top: 38%;
+  width: 32px;
+  height: 70px;
+  border: 4px solid #2a1f19;
+  background:
+    linear-gradient(#9fd3e7 0 24px, #eef8fb 24px 44px, #476b88 44px),
+    #eef8fb;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.2);
+}
+
+.plant {
+  width: 34px;
+  height: 48px;
+}
+
+.plant::before {
+  position: absolute;
+  left: 7px;
+  top: 0;
+  width: 20px;
+  height: 28px;
+  background:
+    radial-gradient(circle at 20% 70%, #3e8c52 0 8px, transparent 9px),
+    radial-gradient(circle at 55% 40%, #61a764 0 9px, transparent 10px),
+    radial-gradient(circle at 80% 75%, #2f7143 0 8px, transparent 9px);
+  content: "";
+}
+
+.plant::after {
+  position: absolute;
+  left: 6px;
+  bottom: 0;
+  width: 22px;
+  height: 18px;
+  border: 4px solid #2a1f19;
+  background: #d2a04b;
+  content: "";
+}
+
+.plant-a {
+  left: 1.5%;
+  top: 30%;
+}
+
+.plant-b {
+  left: 24%;
+  top: 4%;
+}
+
+.plant-c {
+  right: 1.5%;
+  top: 4%;
+}
+
+.plant-d {
+  left: 41%;
+  bottom: 4%;
+}
+
+.plant-e {
+  right: 49%;
+  bottom: 29%;
+}
+
+.plant-f {
+  right: 1.5%;
+  bottom: 4%;
 }
 
 .agent {
@@ -525,6 +722,55 @@ button:disabled {
     7px 8px 0 -1px #9d4d3f,
     0 16px 0 -1px var(--agent-accent),
     14px 16px 0 -1px var(--agent-accent);
+}
+
+.sprite::before,
+.sprite::after {
+  position: absolute;
+  content: "";
+}
+
+.design-agent .sprite::before,
+.review-agent .sprite::before,
+.security-agent .sprite::before,
+.editor-agent .sprite::before,
+.judge-agent .sprite::before {
+  left: -9px;
+  top: -28px;
+  width: 44px;
+  height: 28px;
+  border: 4px solid #15191f;
+  border-bottom: 0;
+  background:
+    linear-gradient(90deg, var(--hair-color) 0 9px, transparent 9px 35px, var(--hair-color) 35px),
+    var(--hair-color);
+  z-index: -1;
+}
+
+.pm-agent .sprite::before,
+.dev-agent .sprite::before,
+.dx-agent .sprite::before,
+.qa-agent .sprite::before,
+.redteam-agent .sprite::before,
+.scope-agent .sprite::before {
+  left: 12px;
+  top: 12px;
+  width: 6px;
+  height: 22px;
+  background: #15191f;
+  box-shadow: 0 8px 0 var(--agent-accent);
+}
+
+.boss-agent .sprite::after,
+.scope-agent .sprite::after,
+.redteam-agent .sprite::after,
+.judge-agent .sprite::after {
+  left: 5px;
+  top: -18px;
+  width: 21px;
+  height: 4px;
+  background: #15191f;
+  box-shadow: 0 7px 0 #15191f;
 }
 
 .boss-agent {
@@ -637,21 +883,27 @@ button:disabled {
 }
 
 .panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px;
+  padding: 0;
   border-bottom: 4px solid var(--panel-line);
 }
 
-.panel-head h2 {
-  margin-bottom: 0;
+.artifact-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  border: 0;
+  background: #fffdf2;
+  color: var(--ink);
+  box-shadow: none;
   font-size: 20px;
 }
 
-.panel-head span {
+.artifact-toggle strong {
   color: var(--muted);
+  font-size: 18px;
   font-weight: 900;
 }
 
@@ -677,8 +929,8 @@ button:disabled {
 }
 
 pre {
-  min-height: 590px;
-  max-height: calc(100vh - 160px);
+  min-height: 360px;
+  max-height: calc(72vh - 118px);
   margin: 0;
   padding: 14px;
   overflow: auto;
@@ -728,8 +980,8 @@ pre {
   }
 
   .office-map {
-    height: min(66vw, 560px);
-    min-height: 420px;
+    height: min(70vw, calc(100vh - 210px), 680px);
+    min-height: 520px;
   }
 
   pre {
@@ -743,7 +995,7 @@ pre {
   }
 
   .office-map {
-    height: 420px;
+    height: 520px;
     min-height: 0;
   }
 
@@ -753,5 +1005,11 @@ pre {
 
   .desk {
     transform: scale(0.82);
+  }
+
+  .artifact-panel {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
   }
 }

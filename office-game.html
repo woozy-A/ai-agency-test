@@ -140,13 +140,35 @@
             <div class="room review-room">
               <span>Review</span>
             </div>
+            <div class="room ops-room">
+              <span>Ops</span>
+            </div>
 
             <div class="desk desk-boss"></div>
             <div class="desk desk-pm"></div>
             <div class="desk desk-design"></div>
             <div class="desk desk-dev"></div>
             <div class="desk desk-review"></div>
+            <div class="desk desk-scope"></div>
+            <div class="desk desk-dx"></div>
+            <div class="desk desk-qa"></div>
+            <div class="desk desk-redteam"></div>
+            <div class="desk desk-security"></div>
+            <div class="desk desk-editor"></div>
+            <div class="desk desk-judge"></div>
             <div class="meeting-table"></div>
+            <div class="rug rug-meeting"></div>
+            <div class="bookshelf bookshelf-left"></div>
+            <div class="bookshelf bookshelf-right"></div>
+            <div class="whiteboard whiteboard-main">SCORE</div>
+            <div class="sofa sofa-lounge"></div>
+            <div class="water-cooler"></div>
+            <div class="plant plant-a"></div>
+            <div class="plant plant-b"></div>
+            <div class="plant plant-c"></div>
+            <div class="plant plant-d"></div>
+            <div class="plant plant-e"></div>
+            <div class="plant plant-f"></div>
             <div class="delivery-box" id="deliveryBox">OUT</div>
 
             <div class="paper request-paper" id="requestPaper">TASK</div>
@@ -217,10 +239,12 @@
           </div>
         </section>
 
-        <aside class="artifact-panel">
+        <aside class="artifact-panel" id="artifactPanel">
           <div class="panel-head">
-            <h2>Artifacts</h2>
-            <span id="artifactCount">0/6</span>
+            <button id="artifactToggle" class="artifact-toggle" type="button" aria-expanded="false">
+              <span>Artifacts</span>
+              <strong id="artifactCount">0/6</strong>
+            </button>
           </div>
           <div class="artifact-tabs">
             <button class="artifact-tab active" data-artifact="log">Log</button>
