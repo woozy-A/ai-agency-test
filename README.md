@@ -33,6 +33,40 @@ Changwoo -> Mike PM -> Mina Designer + Jay Developer -> Yuna Reviewer -> Deliver
 
 It is still a front-end simulation, but it makes the agent handoff easier to understand.
 
+## Local AI Backend
+
+For the real local AI version, create `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` and set your API key:
+
+```text
+OPENAI_API_KEY=your_api_key_here
+```
+
+Install the OpenAI Python package:
+
+```bash
+python3 -m pip install openai
+```
+
+Start the local backend:
+
+```bash
+python3 server.py
+```
+
+Open:
+
+```text
+http://localhost:8000/office-game.html
+```
+
+When opened through `localhost`, the pixel office calls the backend and runs the AI agent pipeline. When opened on GitHub Pages, it stays in simulation mode so the public demo still works.
+
 ## Code Demo
 
 Run the local Python sample:

@@ -101,12 +101,28 @@ function addLog(text) {
   if (activeArtifact === "log") renderArtifact();
 }
 
-function createArtifacts(request) {
+async function runBackendPipeline(request) {
+  const response = await fetch("/api/run", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ request }),
+  });
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error || "AI pipeline request failed");
+  }
+  return payload;
+}
+
+function createSimulationArtifacts(request) {
   const topic = request.split(".")[0].trim() || request.trim();
   return {
     brief: JSON.stringify(
       {
         owner: "Mike",
+        mode: "GitHub Pages simulation",
         goal: "요청을 실행 가능한 업무 brief로 바꾸기",
         request: topic,
         team: ["Mina: 화면/메시지 구조", "Jay: 구현/자동화", "Yuna: 검토"],
@@ -135,7 +151,14 @@ function createArtifacts(request) {
       "",
       "- 입력값을 request artifact로 저장한다.",
       "- 각 agent step을 순서대로 실행한다.",
-      "- 나중에 이 step들을 실제 AI API 호출로 바꿀 수 있게 분리한다.",
+      "- 로컬 서버 버전에서는 이 step들이 실제 AI API 호출로 바뀐다.",
+    ].join("\n"),
+    review: [
+      "# Yuna's Review",
+      "",
+      "- 역할 흐름은 이해하기 쉽다.",
+      "- 실제 실행판에서는 API 키와 백엔드가 필요하다.",
+      "- 산출물 저장 위치를 화면에 보여주면 좋다.",
     ].join("\n"),
     final: [
       "# Final Delivery",
@@ -145,13 +168,14 @@ function createArtifacts(request) {
       "완성된 흐름:",
       "창우 지시 -> Mike 기획 -> Mina 디자인 -> Jay 구현 -> Yuna 검토 -> 납품",
       "",
-      "다음 확장 지점:",
-      "- Mike를 실제 planning prompt로 교체",
-      "- Mina를 design/content prompt로 교체",
-      "- Jay를 코드 생성 또는 자동화 실행 agent로 교체",
-      "- Yuna를 reviewer prompt로 교체",
+      "로컬 실행판:",
+      "`python3 server.py`로 열면 실제 AI API를 호출한다.",
     ].join("\n"),
   };
+}
+
+function shouldUseBackend() {
+  return ["localhost", "127.0.0.1"].includes(window.location.hostname);
 }
 
 function updateArtifactCount() {
@@ -202,14 +226,35 @@ async function runOffice() {
   els.deliveryBox.classList.remove("complete");
 
   const request = els.requestInput.value.trim();
-  pendingArtifacts = createArtifacts(request);
+  let backendResult;
 
   showPaper("request");
   addLog("창우가 새 업무 지시서를 올렸습니다.");
   await say("changwoo", "Mike, 이거 맡아서 굴려줘.", 1100);
 
   await moveAgent("mike", positions.mike.boss, "PM Mike is receiving the request");
-  await say("mike", "네. 목표랑 산출물부터 쪼개볼게요.", 1200);
+  await say("mike", "네. 실제 AI 팀을 호출할게요.", 1200);
+  setTask("Running", "AI agents are working on the request");
+  if (shouldUseBackend()) {
+    try {
+      backendResult = await runBackendPipeline(request);
+      pendingArtifacts = backendResult.artifacts;
+      addLog(`AI pipeline completed with ${backendResult.model}`);
+      addLog(`결과 저장 위치: ${backendResult.output_dir}`);
+    } catch (error) {
+      artifacts.log = logs.concat([`ERROR. ${error.message}`]).join("\n");
+      activeArtifact = "log";
+      renderArtifact();
+      setTask("Error", "Backend setup needs attention");
+      await say("mike", "백엔드 설정을 먼저 확인해야 해요.", 1400);
+      running = false;
+      els.startButton.disabled = false;
+      return;
+    }
+  } else {
+    pendingArtifacts = createSimulationArtifacts(request);
+    addLog("공개 링크에서는 시뮬레이션 모드로 실행됩니다.");
+  }
   artifacts.brief = pendingArtifacts.brief;
   addLog("Mike가 요청을 brief로 정리했습니다.");
   showPaper("brief");
