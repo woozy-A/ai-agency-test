@@ -4,6 +4,7 @@ from server import (
     AGENT_ROLES,
     detect_project_type,
     extract_quality_score,
+    get_agent_provider,
     get_model_candidates,
     normalize_artifacts,
     project_file_contract,
@@ -66,6 +67,14 @@ class ProjectRoutingTest(unittest.TestCase):
     def test_model_candidates_include_primary_first(self):
         candidates = get_model_candidates("gemini-2.5-flash-lite")
         self.assertEqual(candidates[0], "gemini-2.5-flash-lite")
+
+    def test_ollama_model_candidates_include_local_fallbacks(self):
+        candidates = get_model_candidates("qwen3:14b", "ollama")
+        self.assertEqual(candidates[0], "qwen3:14b")
+        self.assertIn("qwen2.5-coder:14b", candidates)
+
+    def test_agent_provider_defaults_to_global_provider(self):
+        self.assertIn(get_agent_provider("unknown"), ("gemini", "openai", "ollama"))
 
 
 if __name__ == "__main__":

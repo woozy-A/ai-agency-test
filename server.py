@@ -9,7 +9,7 @@ import traceback
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 
@@ -44,22 +44,26 @@ def get_provider() -> str:
     return os.getenv("AI_PROVIDER", "gemini").strip().lower()
 
 
-def get_model() -> str:
-    provider = get_provider()
+def get_model(provider: str | None = None) -> str:
+    provider = provider or get_provider()
     if provider == "openai":
         return os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
     if provider == "gemini":
         return os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    if provider == "ollama":
+        return os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b")
     raise RuntimeError(f"지원하지 않는 AI_PROVIDER입니다: {provider}")
 
 
-def get_model_candidates(primary_model: str) -> list[str]:
-    provider = get_provider()
+def get_model_candidates(primary_model: str, provider: str | None = None) -> list[str]:
+    provider = provider or get_provider()
     models = [primary_model]
     if provider == "gemini":
         fallback_raw = os.getenv("GEMINI_FALLBACK_MODELS", "gemini-2.0-flash-lite,gemini-2.0-flash")
     elif provider == "openai":
         fallback_raw = os.getenv("OPENAI_FALLBACK_MODELS", "")
+    elif provider == "ollama":
+        fallback_raw = os.getenv("OLLAMA_FALLBACK_MODELS", "qwen2.5-coder:14b,llama3.2:latest")
     else:
         fallback_raw = ""
 
@@ -70,9 +74,15 @@ def get_model_candidates(primary_model: str) -> list[str]:
     return models
 
 
+def get_agent_provider(agent_key: str) -> str:
+    load_env()
+    return os.getenv(f"{agent_key.upper()}_PROVIDER", get_provider()).strip().lower()
+
+
 def get_agent_model(agent_key: str) -> str:
     env_key = f"{agent_key.upper()}_MODEL"
-    return os.getenv(env_key, get_model())
+    provider = get_agent_provider(agent_key)
+    return os.getenv(env_key, get_model(provider))
 
 
 def get_pipeline_mode() -> str:
@@ -179,12 +189,53 @@ def ask_gemini_agent(agent_name: str, role_prompt: str, user_prompt: str, model:
     return text
 
 
-def ask_agent(client, agent_name: str, role_prompt: str, user_prompt: str, model: str | None = None) -> str:
-    provider = get_provider()
-    model = model or get_model()
+def ask_ollama_agent(agent_name: str, role_prompt: str, user_prompt: str, model: str) -> str:
+    endpoint = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
+    payload = {
+        "model": model,
+        "stream": False,
+        "messages": [
+            {"role": "system", "content": role_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "options": {
+            "temperature": 0.7,
+        },
+    }
+    request = Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=180) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except URLError as exc:
+        raise RuntimeError(
+            "Ollama 서버에 연결할 수 없습니다. `ollama serve` 또는 Ollama 앱이 실행 중인지 확인해주세요."
+        ) from exc
+
+    text = str(data.get("message", {}).get("content", "")).strip()
+    if not text:
+        raise RuntimeError(f"{agent_name}가 Ollama에서 빈 응답을 반환했습니다: {data}")
+    return text
+
+
+def ask_agent(
+    client,
+    agent_name: str,
+    role_prompt: str,
+    user_prompt: str,
+    model: str | None = None,
+    provider: str | None = None,
+) -> str:
+    provider = provider or get_provider()
+    model = model or get_model(provider)
     if provider == "openai":
+        client = client or require_openai_client()
         last_error = None
-        for candidate in get_model_candidates(model):
+        for candidate in get_model_candidates(model, provider):
             try:
                 return ask_openai_agent(client, agent_name, role_prompt, user_prompt, candidate)
             except Exception as exc:
@@ -192,7 +243,7 @@ def ask_agent(client, agent_name: str, role_prompt: str, user_prompt: str, model
         raise last_error or RuntimeError(f"{agent_name} OpenAI 호출에 실패했습니다.")
     if provider == "gemini":
         last_error = None
-        for candidate in get_model_candidates(model):
+        for candidate in get_model_candidates(model, provider):
             try:
                 return ask_gemini_agent(agent_name, role_prompt, user_prompt, candidate)
             except (RetryableAIError, RuntimeError) as exc:
@@ -200,6 +251,16 @@ def ask_agent(client, agent_name: str, role_prompt: str, user_prompt: str, model
                 if not is_model_fallback_error(exc):
                     raise
         raise last_error or RuntimeError(f"{agent_name} Gemini 호출에 실패했습니다.")
+    if provider == "ollama":
+        last_error = None
+        for candidate in get_model_candidates(model, provider):
+            try:
+                return ask_ollama_agent(agent_name, role_prompt, user_prompt, candidate)
+            except RuntimeError as exc:
+                last_error = exc
+                if "Ollama 서버에 연결할 수 없습니다" in str(exc):
+                    raise
+        raise last_error or RuntimeError(f"{agent_name} Ollama 호출에 실패했습니다.")
     raise RuntimeError(f"지원하지 않는 AI_PROVIDER입니다: {provider}")
 
 
@@ -387,7 +448,7 @@ def run_agent_chat(agent_key: str, question: str) -> dict:
     if not agent:
         raise RuntimeError("알 수 없는 직원입니다.")
 
-    provider = get_provider()
+    provider = get_agent_provider(agent_key)
     client = require_openai_client() if provider == "openai" else None
     model = get_agent_model(agent_key)
     role_prompt = (
@@ -395,7 +456,7 @@ def run_agent_chat(agent_key: str, question: str) -> dict:
         "창우에게 한국어로 답한다. 답변은 6문장 이내로 짧고 구체적으로 한다. "
         "필요하면 체크리스트를 3개 이하로만 제시한다."
     )
-    answer = ask_agent(client, agent["name"], role_prompt, question, model)
+    answer = ask_agent(client, agent["name"], role_prompt, question, model, provider)
     return {
         "ok": True,
         "agent": agent_key,
@@ -403,6 +464,7 @@ def run_agent_chat(agent_key: str, question: str) -> dict:
         "role": agent["role"],
         "provider": provider,
         "model": model,
+        "model_candidates": get_model_candidates(model, provider),
         "answer": answer,
     }
 
@@ -548,6 +610,11 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         "다음 액션과 구현 요약을 명확히 쓴다."
     )
 
+    mike_provider = get_agent_provider("mike")
+    mina_provider = get_agent_provider("mina")
+    jay_provider = get_agent_provider("jay")
+    yuna_provider = get_agent_provider("yuna")
+    final_provider = get_agent_provider("final")
     mike_model = get_agent_model("mike")
     mina_model = get_agent_model("mina")
     jay_model = get_agent_model("jay")
@@ -560,6 +627,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         mike_role,
         f"창우의 요청:\n{request}\n\n1) brief\n2) 작업 계획\n3) Mina/Jay/Yuna에게 줄 지시를 작성해줘.",
         mike_model,
+        mike_provider,
     )
     design = ask_agent(
         client,
@@ -567,6 +635,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         mina_role,
         f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\n디자인/UX/콘텐츠 구조를 제안해줘.",
         mina_model,
+        mina_provider,
     )
     dev = ask_agent(
         client,
@@ -574,6 +643,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         jay_role,
         f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\nMina 결과:\n{design}\n\n구현 계획과 핵심 코드 방향을 작성해줘.",
         jay_model,
+        jay_provider,
     )
     review = ask_agent(
         client,
@@ -581,6 +651,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         yuna_role,
         f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\n검토 결과를 작성해줘.",
         yuna_model,
+        yuna_provider,
     )
     final = ask_agent(
         client,
@@ -588,6 +659,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         final_role,
         f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\nYuna review:\n{review}\n\n최종 결과물을 작성해줘.",
         final_model,
+        final_provider,
     )
 
     artifacts = {
@@ -599,8 +671,8 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         "final": final,
     }
     models = (
-        f"Mike={mike_model}, Mina={mina_model}, Jay={jay_model}, "
-        f"Yuna={yuna_model}, Finalizer={final_model}"
+        f"Mike={mike_provider}/{mike_model}, Mina={mina_provider}/{mina_model}, Jay={jay_provider}/{jay_model}, "
+        f"Yuna={yuna_provider}/{yuna_model}, Finalizer={final_provider}/{final_model}"
     )
     return artifacts, [], 5, models
 
@@ -624,7 +696,7 @@ def run_ai_pipeline(request: str) -> dict:
         "project_type": detect_project_type(request),
         "provider": provider,
         "model": model_summary,
-        "model_candidates": get_model_candidates(get_model()),
+        "model_candidates": get_model_candidates(get_model(provider), provider),
         "mode": mode,
         "calls": calls,
         "output_dir": str(output_dir),
