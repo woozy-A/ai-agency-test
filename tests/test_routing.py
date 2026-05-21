@@ -1,11 +1,15 @@
 import unittest
+from unittest.mock import patch
 
 from server import (
     AGENT_ROLES,
+    ask_final_editor,
     detect_project_type,
     extract_quality_score,
+    get_agent_config,
     get_agent_provider,
     get_model_candidates,
+    is_important_request,
     normalize_artifacts,
     project_file_contract,
 )
@@ -75,6 +79,54 @@ class ProjectRoutingTest(unittest.TestCase):
 
     def test_agent_provider_defaults_to_global_provider(self):
         self.assertIn(get_agent_provider("unknown"), ("gemini", "openai", "ollama"))
+
+    def test_important_request_escalates_to_director(self):
+        self.assertTrue(is_important_request("신중하게 SwiftUI macOS 앱 프롬프트를 만들어줘"))
+        self.assertFalse(is_important_request("간단한 투두 앱 프롬프트 만들어줘"))
+
+    def test_agent_config_exposes_finalizer_fallbacks(self):
+        config = get_agent_config()
+        self.assertIn("agents", config)
+        self.assertIn("finalizer", config)
+        self.assertIn("gemini/gemini-2.5-flash", config["finalizer"]["important"])
+        self.assertIn("ollama/qwen3:14b", config["finalizer"]["normal"])
+
+    def test_normal_finalizer_skips_director_model(self):
+        calls = []
+
+        def fake_ask(*args):
+            calls.append((args[4], args[5]))
+            return "final"
+
+        with patch("server.ask_agent_once", side_effect=fake_ask):
+            answer, route = ask_final_editor(None, "role", "prompt", important=False)
+
+        self.assertEqual(answer, "final")
+        self.assertNotIn("gemini-2.5-flash", route)
+        self.assertEqual(calls[0], ("gemini-2.0-flash", "gemini"))
+
+    def test_important_finalizer_falls_back_to_local_model(self):
+        calls = []
+
+        def fake_ask(*args):
+            calls.append((args[4], args[5]))
+            if args[5] == "ollama":
+                return "local final"
+            raise RuntimeError("503 UNAVAILABLE")
+
+        with patch("server.ask_agent_once", side_effect=fake_ask):
+            answer, route = ask_final_editor(None, "role", "prompt", important=True)
+
+        self.assertEqual(answer, "local final")
+        self.assertEqual(
+            calls,
+            [
+                ("gemini-2.5-flash", "gemini"),
+                ("gemini-2.0-flash", "gemini"),
+                ("qwen3:14b", "ollama"),
+            ],
+        )
+        self.assertEqual(route, "gemini/gemini-2.5-flash -> gemini/gemini-2.0-flash -> ollama/qwen3:14b")
 
 
 if __name__ == "__main__":

@@ -49,6 +49,27 @@ const agentRoles = {
   vera: "Validation Judge",
 };
 
+const defaultAgentConfig = {
+  mode: "demo",
+  finalizer: {
+    normal: ["gemini/gemini-2.0-flash", "ollama/qwen3:14b"],
+    important: ["gemini/gemini-2.5-flash", "gemini/gemini-2.0-flash", "ollama/qwen3:14b"],
+  },
+  agents: {
+    mike: { provider: "ollama", model: "qwen3:14b", kind: "Local" },
+    mina: { provider: "ollama", model: "qwen3:14b", kind: "Local" },
+    jay: { provider: "ollama", model: "qwen2.5-coder:14b", kind: "Local" },
+    yuna: { provider: "ollama", model: "deepseek-coder-v2:16b", kind: "Local" },
+    dana: { provider: "ollama", model: "qwen2.5-coder:14b", kind: "Local" },
+    testkim: { provider: "ollama", model: "deepseek-coder-v2:16b", kind: "Local" },
+    jason: { provider: "ollama", model: "qwen3:14b", kind: "Local" },
+    sana: { provider: "ollama", model: "qwen3:14b", kind: "Local" },
+    iris: { provider: "ollama", model: "qwen3:14b", kind: "Local" },
+    vera: { provider: "ollama", model: "qwen3:14b", kind: "Local" },
+    changwoo: { provider: "human", model: "boss", kind: "Human" },
+  },
+};
+
 const simulationAnswers = {
   changwoo: "나는 최종 의사결정자 역할이야. 지금 봐야 할 건 재미보다도 이 도구가 Codex에 넣을 좋은 프롬프트를 안정적으로 뽑는지야.",
   mike: "PM은 요청을 목표, 범위, 산출물, 우선순위로 바꾸는 역할입니다. Codex가 어디까지 해야 하는지 먼저 정리합니다.",
@@ -81,6 +102,7 @@ const els = {
   agentQuestion: document.querySelector("#agentQuestion"),
   agentChatStatus: document.querySelector("#agentChatStatus"),
   agentChatLog: document.querySelector("#agentChatLog"),
+  modelRouting: document.querySelector("#modelRouting"),
   askAgentButton: document.querySelector("#askAgentButton"),
   exportChatButton: document.querySelector("#exportChatButton"),
   clearChatButton: document.querySelector("#clearChatButton"),
@@ -109,6 +131,7 @@ let activeArtifact = "log";
 let running = false;
 let selectedAgent = "dana";
 let chatHistory = loadChatHistory();
+let agentConfig = defaultAgentConfig;
 
 function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -126,6 +149,63 @@ function loadChatHistory() {
 
 function saveChatHistory() {
   window.localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(chatHistory.slice(-80)));
+}
+
+function routeFor(agentKey) {
+  return agentConfig.agents?.[agentKey] || defaultAgentConfig.agents[agentKey] || {};
+}
+
+function formatRoute(agentKey) {
+  const route = routeFor(agentKey);
+  if (!route.provider || !route.model) return "model unknown";
+  if (route.provider === "human") return "Human";
+  return `${route.provider}/${route.model}`;
+}
+
+function routeKindClass(route) {
+  if (route.provider === "ollama") return "local";
+  if (route.provider === "gemini" || route.provider === "openai") return "api";
+  return "";
+}
+
+function renderModelConfig() {
+  Object.entries(els.cards).forEach(([agentKey, card]) => {
+    card.querySelector(".model-badge")?.remove();
+    const textWrap = card.querySelector("span:last-child");
+    if (!textWrap) return;
+    const route = routeFor(agentKey);
+    const badge = document.createElement("em");
+    badge.className = `model-badge ${routeKindClass(route)}`;
+    badge.textContent = formatRoute(agentKey);
+    badge.title = route.kind ? `${route.kind}: ${formatRoute(agentKey)}` : formatRoute(agentKey);
+    textWrap.append(badge);
+  });
+
+  if (!els.modelRouting) return;
+  const normal = agentConfig.finalizer?.normal?.join(" -> ") || "gemini/gemini-2.0-flash -> ollama/qwen3:14b";
+  const important = agentConfig.finalizer?.important?.join(" -> ") || "gemini/gemini-2.5-flash -> gemini/gemini-2.0-flash -> ollama/qwen3:14b";
+  els.modelRouting.innerHTML = `
+    <strong>Model Routing</strong>
+    <p>Pipeline: ${agentConfig.mode || "multi"}</p>
+    <p>평소 Final: ${normal}</p>
+    <p>중요 Final: ${important}</p>
+  `;
+}
+
+async function loadAgentConfig() {
+  if (location.protocol === "file:" || location.hostname.includes("github.io")) {
+    renderModelConfig();
+    return;
+  }
+  try {
+    const response = await fetch("/api/agent-config");
+    if (!response.ok) throw new Error("config unavailable");
+    const payload = await response.json();
+    if (payload?.ok) agentConfig = payload;
+  } catch {
+    agentConfig = defaultAgentConfig;
+  }
+  renderModelConfig();
 }
 
 function formatChatHistoryMarkdown() {
@@ -232,7 +312,7 @@ function selectAgent(agentKey, announce = true) {
   selectedAgent = agentKey;
   setActiveAgent(agentKey);
   els.selectedAgentLabel.textContent = agentLabels[agentKey];
-  els.agentChatStatus.textContent = `${agentLabels[agentKey]} ${agentRoles[agentKey]} 선택됨`;
+  els.agentChatStatus.textContent = `${agentLabels[agentKey]} ${agentRoles[agentKey]} 선택됨 · ${formatRoute(agentKey)}`;
   if (announce) {
     showSpeech(agentKey, "저에게 물어보세요.");
     window.setTimeout(() => hideSpeech(agentKey), 1440);
@@ -667,7 +747,7 @@ els.agentChatForm.addEventListener("submit", async (event) => {
     const payload = await askAgent(agentKey, question);
     const source = payload.provider ? `${payload.provider}/${payload.model}` : "";
     addChatHistory(agentKey, question, payload.answer, source);
-    els.agentChatStatus.textContent = `${agentLabels[agentKey]} 답변 기록됨`;
+    els.agentChatStatus.textContent = `${agentLabels[agentKey]} 답변 기록됨 · ${source || formatRoute(agentKey)}`;
     showSpeech(agentKey, "답변했습니다.");
     addLog(`${agentLabels[agentKey]} 질문 기록: ${question}`);
   } catch (error) {
@@ -691,3 +771,4 @@ els.resetButton.addEventListener("click", resetOffice);
 
 resetOffice();
 renderChatHistory();
+loadAgentConfig();

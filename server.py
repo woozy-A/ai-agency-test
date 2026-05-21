@@ -89,9 +89,46 @@ def get_agent_model(agent_key: str) -> str:
     return os.getenv(env_key, get_model(provider))
 
 
+def get_agent_route(agent_key: str) -> dict[str, str | list[str]]:
+    provider = get_agent_provider(agent_key)
+    model = get_agent_model(agent_key)
+    return {
+        "provider": provider,
+        "model": model,
+        "kind": "Local" if provider == "ollama" else "External API",
+        "candidates": get_model_candidates(model, provider),
+    }
+
+
 def get_pipeline_mode() -> str:
     load_env()
     return os.getenv("AI_PIPELINE_MODE", "one_call").strip().lower()
+
+
+def is_important_request(request: str) -> bool:
+    lowered = request.lower()
+    markers = (
+        "중요",
+        "신중",
+        "퀄리티",
+        "품질",
+        "프로덕션",
+        "배포",
+        "상용",
+        "실서비스",
+        "보안",
+        "결제",
+        "로그인",
+        "xcode",
+        "swift",
+        "macos",
+        "ios",
+        "production",
+        "release",
+        "security",
+        "payment",
+    )
+    return any(marker in lowered for marker in markers)
 
 
 def require_openai_client():
@@ -266,6 +303,53 @@ def ask_agent(
                     raise
         raise last_error or RuntimeError(f"{agent_name} Ollama 호출에 실패했습니다.")
     raise RuntimeError(f"지원하지 않는 AI_PROVIDER입니다: {provider}")
+
+
+def ask_agent_once(
+    client,
+    agent_name: str,
+    role_prompt: str,
+    user_prompt: str,
+    model: str,
+    provider: str,
+) -> str:
+    if provider == "openai":
+        return ask_openai_agent(client or require_openai_client(), agent_name, role_prompt, user_prompt, model)
+    if provider == "gemini":
+        return ask_gemini_agent(agent_name, role_prompt, user_prompt, model)
+    if provider == "ollama":
+        return ask_ollama_agent(agent_name, role_prompt, user_prompt, model)
+    raise RuntimeError(f"지원하지 않는 AI_PROVIDER입니다: {provider}")
+
+
+def ask_final_editor(client, role_prompt: str, user_prompt: str, important: bool) -> tuple[str, str]:
+    fallback_provider = os.getenv("FINAL_LOCAL_PROVIDER", "ollama")
+    fallback_model = os.getenv("FINAL_LOCAL_MODEL", "qwen3:14b")
+    normal_models = [os.getenv("FINAL_MODEL", "gemini-2.0-flash")]
+    important_models = [
+        os.getenv("FINAL_DIRECTOR_MODEL", "gemini-2.5-flash"),
+        os.getenv("FINAL_MODEL", "gemini-2.0-flash"),
+    ]
+    chain = [("gemini", model) for model in (important_models if important else normal_models)]
+    chain.append((fallback_provider, fallback_model))
+
+    last_error = None
+    tried = []
+    for provider, model in chain:
+        route = f"{provider}/{model}"
+        if route in tried:
+            continue
+        tried.append(route)
+        try:
+            return ask_agent_once(client, "Finalizer", role_prompt, user_prompt, model, provider), " -> ".join(tried)
+        except (RetryableAIError, RuntimeError, Exception) as exc:
+            last_error = exc
+            if provider != "gemini" or not is_model_fallback_error(exc):
+                if provider == fallback_provider and model == fallback_model:
+                    break
+                if provider != "gemini":
+                    continue
+    raise last_error or RuntimeError("Finalizer 호출에 실패했습니다.")
 
 
 def is_model_fallback_error(exc: Exception) -> bool:
@@ -618,12 +702,11 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
     mina_provider = get_agent_provider("mina")
     jay_provider = get_agent_provider("jay")
     yuna_provider = get_agent_provider("yuna")
-    final_provider = get_agent_provider("final")
     mike_model = get_agent_model("mike")
     mina_model = get_agent_model("mina")
     jay_model = get_agent_model("jay")
     yuna_model = get_agent_model("yuna")
-    final_model = get_agent_model("final")
+    important = is_important_request(request)
 
     brief = ask_agent(
         client,
@@ -657,14 +740,12 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         yuna_model,
         yuna_provider,
     )
-    final = ask_agent(
+    final, final_route = ask_final_editor(
         client,
-        "Finalizer",
         final_role,
         f"원 요청:\n{request}\n\nPM/기획 Mike:\n{brief}\n\n구조 정리 Mina:\n{design}\n\nDev/구현안 Jay:\n{dev}\n\nQA/비판 Yuna:\n{review}\n\n"
         "이 내용을 하나의 Codex용 최종 프롬프트로 압축해줘. 설명문이 아니라, 바로 붙여넣어 실행할 지시문이어야 한다.",
-        final_model,
-        final_provider,
+        important,
     )
 
     artifacts = {
@@ -677,9 +758,37 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
     }
     models = (
         f"Mike={mike_provider}/{mike_model}, Mina={mina_provider}/{mina_model}, Jay={jay_provider}/{jay_model}, "
-        f"Yuna={yuna_provider}/{yuna_model}, Finalizer={final_provider}/{final_model}"
+        f"Yuna={yuna_provider}/{yuna_model}, Finalizer={final_route}"
     )
     return artifacts, [], 5, models
+
+
+def get_agent_config() -> dict:
+    agents = {}
+    for key, value in AGENT_ROLES.items():
+        route = get_agent_route(key)
+        agents[key] = {
+            "name": value["name"],
+            "role": value["role"],
+            **route,
+        }
+    return {
+        "ok": True,
+        "mode": get_pipeline_mode(),
+        "important_markers": ["중요", "신중", "퀄리티", "프로덕션", "배포", "보안", "결제", "Swift", "macOS", "iOS"],
+        "finalizer": {
+            "normal": [
+                f"gemini/{os.getenv('FINAL_MODEL', 'gemini-2.0-flash')}",
+                f"ollama/{os.getenv('FINAL_LOCAL_MODEL', 'qwen3:14b')}",
+            ],
+            "important": [
+                f"gemini/{os.getenv('FINAL_DIRECTOR_MODEL', 'gemini-2.5-flash')}",
+                f"gemini/{os.getenv('FINAL_MODEL', 'gemini-2.0-flash')}",
+                f"ollama/{os.getenv('FINAL_LOCAL_MODEL', 'qwen3:14b')}",
+            ],
+        },
+        "agents": agents,
+    }
 
 
 def run_ai_pipeline(request: str) -> dict:
@@ -722,6 +831,17 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_GET(self) -> None:
+        path = urlparse(self.path).path
+        if path == "/api/agent-config":
+            try:
+                self.send_json(200, get_agent_config())
+            except Exception as exc:
+                traceback.print_exc()
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        super().do_GET()
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
