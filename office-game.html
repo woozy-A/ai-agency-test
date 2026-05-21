@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pixel AI Agency Office</title>
+    <link rel="stylesheet" href="./office-game.css" />
+  </head>
+  <body>
+    <main class="game-shell">
+      <section class="game-layout">
+        <aside class="side-panel">
+          <div class="brand-block">
+            <p class="eyebrow">Pixel agents</p>
+            <h1>Changwoo AI Agency</h1>
+          </div>
+
+          <label for="requestInput">창우 사장의 업무 지시</label>
+          <textarea id="requestInput" rows="7">신규 온라인 강의 런칭을 위한 랜딩페이지 카피와 SNS 홍보 문구를 만들어줘. 타깃은 1인 창업을 준비하는 직장인이고, 톤은 실용적이고 신뢰감 있게.</textarea>
+
+          <div class="button-row">
+            <button id="startButton" type="button">Start</button>
+            <button id="resetButton" class="secondary" type="button">Reset</button>
+          </div>
+
+          <section class="team-list" aria-label="AI agents">
+            <h2>Team</h2>
+            <div class="team-member" data-agent-card="changwoo">
+              <span class="swatch boss"></span>
+              <div>
+                <strong>창우</strong>
+                <small>Boss</small>
+              </div>
+            </div>
+            <div class="team-member" data-agent-card="mike">
+              <span class="swatch pm"></span>
+              <div>
+                <strong>Mike</strong>
+                <small>PM</small>
+              </div>
+            </div>
+            <div class="team-member" data-agent-card="mina">
+              <span class="swatch design"></span>
+              <div>
+                <strong>Mina</strong>
+                <small>Designer</small>
+              </div>
+            </div>
+            <div class="team-member" data-agent-card="jay">
+              <span class="swatch dev"></span>
+              <div>
+                <strong>Jay</strong>
+                <small>Developer</small>
+              </div>
+            </div>
+            <div class="team-member" data-agent-card="yuna">
+              <span class="swatch review"></span>
+              <div>
+                <strong>Yuna</strong>
+                <small>Reviewer</small>
+              </div>
+            </div>
+          </section>
+        </aside>
+
+        <section class="office-wrap">
+          <div class="hud">
+            <div>
+              <span>Status</span>
+              <strong id="statusText">Idle</strong>
+            </div>
+            <div>
+              <span>Current task</span>
+              <strong id="taskText">Waiting for request</strong>
+            </div>
+          </div>
+
+          <div class="office-map" id="officeMap" aria-label="Pixel office map">
+            <div class="room boss-room">
+              <span>Boss</span>
+            </div>
+            <div class="room planning-room">
+              <span>Planning</span>
+            </div>
+            <div class="room design-room">
+              <span>Design</span>
+            </div>
+            <div class="room dev-room">
+              <span>Dev</span>
+            </div>
+            <div class="room review-room">
+              <span>Review</span>
+            </div>
+
+            <div class="desk desk-boss"></div>
+            <div class="desk desk-pm"></div>
+            <div class="desk desk-design"></div>
+            <div class="desk desk-dev"></div>
+            <div class="desk desk-review"></div>
+            <div class="meeting-table"></div>
+            <div class="delivery-box" id="deliveryBox">OUT</div>
+
+            <div class="paper request-paper" id="requestPaper">REQ</div>
+            <div class="paper brief-paper" id="briefPaper">BRF</div>
+            <div class="paper draft-paper" id="draftPaper">DRF</div>
+            <div class="paper final-paper" id="finalPaper">FIN</div>
+
+            <div class="agent boss-agent" data-agent="changwoo">
+              <div class="speech"></div>
+              <div class="sprite"><span></span></div>
+              <strong>창우</strong>
+            </div>
+            <div class="agent pm-agent" data-agent="mike">
+              <div class="speech"></div>
+              <div class="sprite"><span></span></div>
+              <strong>Mike</strong>
+            </div>
+            <div class="agent design-agent" data-agent="mina">
+              <div class="speech"></div>
+              <div class="sprite"><span></span></div>
+              <strong>Mina</strong>
+            </div>
+            <div class="agent dev-agent" data-agent="jay">
+              <div class="speech"></div>
+              <div class="sprite"><span></span></div>
+              <strong>Jay</strong>
+            </div>
+            <div class="agent review-agent" data-agent="yuna">
+              <div class="speech"></div>
+              <div class="sprite"><span></span></div>
+              <strong>Yuna</strong>
+            </div>
+          </div>
+        </section>
+
+        <aside class="artifact-panel">
+          <div class="panel-head">
+            <h2>Artifacts</h2>
+            <span id="artifactCount">0/6</span>
+          </div>
+          <div class="artifact-tabs">
+            <button class="artifact-tab active" data-artifact="log">Log</button>
+            <button class="artifact-tab" data-artifact="brief">Brief</button>
+            <button class="artifact-tab" data-artifact="plan">Plan</button>
+            <button class="artifact-tab" data-artifact="design">Design</button>
+            <button class="artifact-tab" data-artifact="dev">Dev</button>
+            <button class="artifact-tab" data-artifact="final">Final</button>
+          </div>
+          <pre id="artifactOutput">아직 실행 전입니다.</pre>
+        </aside>
+      </section>
+    </main>
+
+    <script src="./office-game.js"></script>
+  </body>
+</html>
