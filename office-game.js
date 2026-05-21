@@ -64,6 +64,8 @@ const simulationAnswers = {
   vera: "Validation Judge는 점수를 매깁니다. 명확성, 범위, 테스트 가능성, 안전성, Codex 사용성을 기준으로 통과 여부를 판단합니다.",
 };
 
+const CHAT_HISTORY_KEY = "changwooPromptAgency.agentChatHistory";
+
 const els = {
   requestInput: document.querySelector("#requestInput"),
   startButton: document.querySelector("#startButton"),
@@ -77,7 +79,8 @@ const els = {
   teamDrawer: document.querySelector(".team-drawer"),
   agentChatForm: document.querySelector("#agentChatForm"),
   agentQuestion: document.querySelector("#agentQuestion"),
-  agentAnswer: document.querySelector("#agentAnswer"),
+  agentChatStatus: document.querySelector("#agentChatStatus"),
+  agentChatLog: document.querySelector("#agentChatLog"),
   askAgentButton: document.querySelector("#askAgentButton"),
   selectedAgentLabel: document.querySelector("#selectedAgentLabel"),
   deliveryBox: document.querySelector("#deliveryBox"),
@@ -102,9 +105,72 @@ let logs = [];
 let activeArtifact = "log";
 let running = false;
 let selectedAgent = "dana";
+let chatHistory = loadChatHistory();
 
 function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function loadChatHistory() {
+  try {
+    const raw = window.localStorage.getItem(CHAT_HISTORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveChatHistory() {
+  window.localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(chatHistory.slice(-80)));
+}
+
+function renderChatHistory() {
+  els.agentChatLog.textContent = "";
+  if (!chatHistory.length) {
+    const empty = document.createElement("p");
+    empty.className = "chat-empty";
+    empty.textContent = "아직 질문 기록이 없습니다. 팀원을 고르고 질문하면 여기에 계속 쌓입니다.";
+    els.agentChatLog.append(empty);
+    return;
+  }
+
+  chatHistory.forEach((item) => {
+    const entry = document.createElement("article");
+    entry.className = "chat-entry";
+
+    const meta = document.createElement("span");
+    meta.textContent = `${item.time} · ${item.agentName} ${item.agentRole}`;
+
+    const question = document.createElement("p");
+    question.className = "chat-question";
+    question.textContent = `Q. ${item.question}`;
+
+    const answerTitle = document.createElement("strong");
+    answerTitle.textContent = "A.";
+
+    const answer = document.createElement("p");
+    answer.className = "chat-answer";
+    answer.textContent = item.answer;
+
+    entry.append(meta, question, answerTitle, answer);
+    els.agentChatLog.append(entry);
+  });
+  els.agentChatLog.scrollTop = els.agentChatLog.scrollHeight;
+}
+
+function addChatHistory(agentKey, question, answer, source) {
+  const now = new Date();
+  chatHistory.push({
+    agent: agentKey,
+    agentName: agentLabels[agentKey],
+    agentRole: agentRoles[agentKey],
+    question,
+    answer: source ? `${answer}\n\n(${source})` : answer,
+    time: now.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }),
+  });
+  saveChatHistory();
+  renderChatHistory();
 }
 
 function setAgentPosition(agentKey, point) {
@@ -123,11 +189,10 @@ function selectAgent(agentKey, announce = true) {
   selectedAgent = agentKey;
   setActiveAgent(agentKey);
   els.selectedAgentLabel.textContent = agentLabels[agentKey];
+  els.agentChatStatus.textContent = `${agentLabels[agentKey]} ${agentRoles[agentKey]} 선택됨`;
   if (announce) {
-    const line = `${agentLabels[agentKey]} ${agentRoles[agentKey]} 선택됨`;
-    els.agentAnswer.textContent = `${line}\n질문을 입력하고 Ask를 누르면 답변합니다.`;
     showSpeech(agentKey, "저에게 물어보세요.");
-    window.setTimeout(() => hideSpeech(agentKey), 1200);
+    window.setTimeout(() => hideSpeech(agentKey), 1440);
   }
 }
 
@@ -168,7 +233,7 @@ async function moveAgentPath(agentKey, points, taskText) {
 
 async function say(agentKey, text, ms = 1000) {
   showSpeech(agentKey, text);
-  await sleep(ms);
+  await sleep(ms * 1.2);
   hideSpeech(agentKey);
 }
 
@@ -294,11 +359,11 @@ function toggleArtifactPanel(forceOpen) {
   els.artifactToggle.setAttribute("aria-expanded", String(shouldOpen));
 }
 
-async function askSelectedAgent(question) {
+async function askAgent(agentKey, question) {
   if (!shouldUseBackend()) {
     await sleep(250);
     return {
-      answer: simulationAnswers[selectedAgent] || "공개 링크에서는 데모 답변만 가능합니다. 로컬 서버를 켜면 실제 모델 답변을 받을 수 있습니다.",
+      answer: simulationAnswers[agentKey] || "공개 링크에서는 데모 답변만 가능합니다. 로컬 서버를 켜면 실제 모델 답변을 받을 수 있습니다.",
       provider: "simulation",
       model: "github-pages",
     };
@@ -309,7 +374,7 @@ async function askSelectedAgent(question) {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ agent: selectedAgent, question }),
+    body: JSON.stringify({ agent: agentKey, question }),
   });
   const payload = await response.json();
   if (!response.ok || !payload.ok) {
@@ -342,6 +407,22 @@ function resetOffice() {
   updateArtifactCount();
   renderArtifact();
   els.startButton.disabled = false;
+}
+
+async function sendEveryoneHome() {
+  setTask("Wrapping up", "Team is returning to desks");
+  await say("mike", "오늘 회의는 여기까지. 모두 고생했어요.", 1500);
+  await Promise.all(
+    Object.keys(els.agents).map((agentKey) => {
+      const home = positions[agentKey]?.home;
+      if (!home) return Promise.resolve();
+      return moveAgentPath(agentKey, [positions.hallway.delivery, home], `${agentLabels[agentKey]} is returning to desk`);
+    })
+  );
+  await Promise.all([
+    say("dana", "기록은 남겨둘게요.", 900),
+    say("yuna", "검수 항목도 정리됐습니다.", 900),
+  ]);
 }
 
 async function runOffice() {
@@ -467,6 +548,8 @@ async function runOffice() {
   await say("mike", "Codex용 최종 프롬프트 준비됐습니다.", 1200);
   await say("changwoo", "좋아. 이걸 Codex에 넣어볼게.", 1100);
   addLog("프롬프트 패키지가 납품 박스에 도착했습니다.");
+  await sendEveryoneHome();
+  addLog("회의 종료 후 팀원이 각자 자리로 돌아갔습니다.");
 
   activeArtifact = "final";
   renderArtifact();
@@ -499,22 +582,26 @@ els.agentChatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const question = els.agentQuestion.value.trim();
   if (!question) return;
+  const agentKey = selectedAgent;
   els.askAgentButton.disabled = true;
-  els.agentAnswer.textContent = `${agentLabels[selectedAgent]}에게 질문 중...`;
-  setTask("Asking", `${agentLabels[selectedAgent]} is answering`);
-  showSpeech(selectedAgent, "잠깐만요. 답변 정리 중입니다.");
+  els.agentChatStatus.textContent = `${agentLabels[agentKey]}에게 질문 중...`;
+  setTask("Asking", `${agentLabels[agentKey]} is answering`);
+  showSpeech(agentKey, "잠깐만요. 답변 정리 중입니다.");
   try {
-    const payload = await askSelectedAgent(question);
-    const source = payload.provider ? `\n\n(${payload.provider}/${payload.model})` : "";
-    els.agentAnswer.textContent = payload.answer + source;
-    showSpeech(selectedAgent, "답변했습니다.");
-    addLog(`${agentLabels[selectedAgent]}가 질문에 답변했습니다.`);
+    const payload = await askAgent(agentKey, question);
+    const source = payload.provider ? `${payload.provider}/${payload.model}` : "";
+    addChatHistory(agentKey, question, payload.answer, source);
+    els.agentChatStatus.textContent = `${agentLabels[agentKey]} 답변 기록됨`;
+    showSpeech(agentKey, "답변했습니다.");
+    addLog(`${agentLabels[agentKey]} 질문 기록: ${question}`);
   } catch (error) {
-    els.agentAnswer.textContent = `ERROR. ${error.message}`;
-    showSpeech(selectedAgent, "오류가 났어요.");
+    addChatHistory(agentKey, question, `ERROR. ${error.message}`, "error");
+    els.agentChatStatus.textContent = "질문 처리 오류";
+    showSpeech(agentKey, "오류가 났어요.");
+    addLog(`${agentLabels[agentKey]} 질문 오류: ${question}`);
   } finally {
-    await sleep(900);
-    hideSpeech(selectedAgent);
+    await sleep(1080);
+    hideSpeech(agentKey);
     setTask(running ? "Running" : "Idle", running ? "Pipeline is running" : "Waiting for request");
     els.askAgentButton.disabled = false;
   }
@@ -525,3 +612,4 @@ els.startButton.addEventListener("click", runOffice);
 els.resetButton.addEventListener("click", resetOffice);
 
 resetOffice();
+renderChatHistory();

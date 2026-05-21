@@ -340,11 +340,54 @@ button:disabled {
   resize: vertical;
 }
 
-.agent-answer {
-  min-height: 100px;
-  max-height: 180px;
+.agent-chat-status {
+  margin: 0;
+  padding: 10px;
   border-top: 4px solid var(--panel-line);
+  color: var(--muted);
   font-size: 12px;
+  font-weight: 900;
+}
+
+.agent-chat-log {
+  display: grid;
+  gap: 8px;
+  min-height: 120px;
+  max-height: 220px;
+  padding: 10px;
+  overflow: auto;
+  border-top: 4px solid var(--panel-line);
+  background: #fffdf2;
+  color: #213044;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.chat-entry {
+  border: 3px solid #d2c6a0;
+  background: #fff9dc;
+  padding: 8px;
+}
+
+.chat-entry strong,
+.chat-entry span {
+  display: block;
+}
+
+.chat-entry strong {
+  margin-bottom: 5px;
+  color: var(--ink);
+}
+
+.chat-entry span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.chat-question,
+.chat-answer {
+  margin: 6px 0 0;
 }
 
 .office-map {
