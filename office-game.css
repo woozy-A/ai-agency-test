@@ -16,6 +16,13 @@
   --design: #d88c36;
   --dev: #3c9b6d;
   --review: #8a61c9;
+  --scope: #5d7896;
+  --dx: #2f8c8c;
+  --qa: #c4972f;
+  --redteam: #c74747;
+  --security: #4d6f50;
+  --editor: #b35f9b;
+  --judge: #5960b5;
   --scale: min(1px, calc((100vw - 560px) / 980));
 }
 
@@ -137,6 +144,12 @@ button:disabled {
   font-size: 18px;
 }
 
+.team-list {
+  max-height: 430px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .team-member {
   display: grid;
   grid-template-columns: 28px 1fr;
@@ -175,6 +188,34 @@ button:disabled {
 
 .swatch.review {
   background: var(--review);
+}
+
+.swatch.scope {
+  background: var(--scope);
+}
+
+.swatch.dx {
+  background: var(--dx);
+}
+
+.swatch.qa {
+  background: var(--qa);
+}
+
+.swatch.redteam {
+  background: var(--redteam);
+}
+
+.swatch.security {
+  background: var(--security);
+}
+
+.swatch.editor {
+  background: var(--editor);
+}
+
+.swatch.judge {
+  background: var(--judge);
 }
 
 .team-member strong,
@@ -514,6 +555,48 @@ button:disabled {
   --agent-color: var(--review);
   --agent-accent: #eadcff;
   --hair-color: #4e347a;
+}
+
+.scope-agent {
+  --agent-color: var(--scope);
+  --agent-accent: #dce8f5;
+  --hair-color: #263241;
+}
+
+.dx-agent {
+  --agent-color: var(--dx);
+  --agent-accent: #d9f6f1;
+  --hair-color: #1f4f4f;
+}
+
+.qa-agent {
+  --agent-color: var(--qa);
+  --agent-accent: #fff1bd;
+  --hair-color: #5c4318;
+}
+
+.redteam-agent {
+  --agent-color: var(--redteam);
+  --agent-accent: #ffd6d6;
+  --hair-color: #2a1f19;
+}
+
+.security-agent {
+  --agent-color: var(--security);
+  --agent-accent: #e0f1dc;
+  --hair-color: #243b25;
+}
+
+.editor-agent {
+  --agent-color: var(--editor);
+  --agent-accent: #ffe0f5;
+  --hair-color: #5a2b50;
+}
+
+.judge-agent {
+  --agent-color: var(--judge);
+  --agent-accent: #dfe2ff;
+  --hair-color: #25294f;
 }
 
 .speech {

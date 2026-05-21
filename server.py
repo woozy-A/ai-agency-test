@@ -301,6 +301,9 @@ def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], list[di
         "너는 Codex 프롬프트 제작 전문 AI 에이전시의 오케스트레이터다. "
         "실제로는 API 호출을 한 번만 사용하지만, 결과는 Mike PM, Mina Designer, Jay Developer, "
         "Yuna Reviewer, Finalizer가 각각 일한 것처럼 나눠서 작성한다. "
+        "추가로 Nora Scope Manager, Dana Developer Experience, Test Kim QA Engineer, "
+        "Jason Red Team Reviewer, Sana Security & Privacy, Iris Prompt Editor, "
+        "Vera Validation Judge의 관점을 반드시 반영한다. "
         "창우는 네가 직접 앱을 만드는 것이 아니라, Codex에 그대로 붙여넣으면 좋은 결과가 나오는 "
         "고품질 작업 프롬프트와 검증 체크리스트를 원한다. "
         "요청 타입에 맞게 Codex가 만들 파일, 성공 기준, 테스트, 검수 절차를 명확히 설계한다. "
@@ -331,7 +334,11 @@ Codex 작업 설계 규칙:
     {{"path": "generated_prompt/codex_prompt.md", "content": "Codex에 그대로 붙여넣을 최종 프롬프트"}},
     {{"path": "generated_prompt/acceptance_checklist.md", "content": "성공 기준 체크리스트"}},
     {{"path": "generated_prompt/test_plan.md", "content": "자동/수동 테스트 계획"}},
-    {{"path": "generated_prompt/risk_notes.md", "content": "위험 요소와 완화책"}}
+    {{"path": "generated_prompt/risk_notes.md", "content": "위험 요소와 완화책"}},
+    {{"path": "generated_prompt/scope.md", "content": "Nora가 정리한 이번 작업 범위와 제외 범위"}},
+    {{"path": "generated_prompt/output_contract.md", "content": "Codex가 마지막에 보고해야 하는 형식"}},
+    {{"path": "generated_prompt/security_notes.md", "content": "Sana가 정리한 보안/비밀값/위험 명령 주의사항"}},
+    {{"path": "generated_prompt/quality_score.md", "content": "Vera가 평가한 프롬프트 품질 점수와 감점 사유"}}
   ]
 }}
 
@@ -341,6 +348,11 @@ Codex 작업 설계 규칙:
 - 성공 기준은 체크박스 목록으로 작성한다.
 - 테스트 계획은 가능한 자동 테스트와 수동 검수를 구분한다.
 - 위험 요소는 빌드 실패, 범위 초과, 플랫폼 차이, 모델 한계 등을 현실적으로 적는다.
+- scope.md에는 이번 작업에서 할 것과 하지 않을 것을 분리한다.
+- output_contract.md에는 Codex의 최종 보고 형식을 "자동 검증 완료 항목 / 검수 필요 항목 / 위험한 항목 / 변경 파일 / 실행 방법"으로 고정한다.
+- security_notes.md에는 API 키, .env, 토큰, 개인정보, destructive command 관련 주의사항을 포함한다.
+- quality_score.md에는 100점 만점 점수, Clarity/Scope/Testability/Safety/Codex Usability 세부 점수, Blocking Issues, Warnings를 포함한다.
+- Jason은 칭찬하지 말고 실패 가능성만 지적한다. Vera는 80점 미만이면 수정 필요라고 표시한다.
 - "3주 계획", "회의 일정", "언젠가 구현" 같은 장기 계획을 쓰지 말고, Codex가 바로 실행할 수 있는 단위로 쓴다.
 """
 

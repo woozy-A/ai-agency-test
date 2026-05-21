@@ -31,12 +31,19 @@ class ProjectRoutingTest(unittest.TestCase):
                 "final": "final",
                 "files": [
                     {"path": "generated_prompt/codex_prompt.md", "content": "# Prompt"},
+                    {"path": "generated_prompt/quality_score.md", "content": "Total: 88/100"},
                     {"path": "../bad.md", "content": "safe path"},
                 ],
             }
         )
         self.assertEqual(files[0]["path"], "generated_prompt/codex_prompt.md")
-        self.assertEqual(files[1]["path"], "bad.md")
+        self.assertEqual(files[1]["path"], "generated_prompt/quality_score.md")
+        self.assertEqual(files[2]["path"], "bad.md")
+
+    def test_prompt_contract_mentions_codex_outputs(self):
+        contract = project_file_contract("web_static")
+        self.assertIn("Codex가 만들 결과물", contract)
+        self.assertIn("앱 코드를 직접 납품하지 말고", contract)
 
 
 if __name__ == "__main__":

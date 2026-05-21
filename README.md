@@ -31,6 +31,20 @@ This version shows the prompt agency as a retro office simulation:
 Changwoo task -> Mike PM -> Mina UX + Jay prompt engineer -> Yuna reviewer -> Codex prompt package
 ```
 
+The full prompt factory includes:
+
+- Mike: PM brief
+- Nora: scope control
+- Mina: UX requirements
+- Dana: developer experience and execution environment
+- Jay: technical implementation instructions
+- Test Kim: test plan
+- Jason: red-team failure review
+- Sana: security and privacy review
+- Iris: prompt editing
+- Vera: prompt quality scoring
+- Yuna: final QA review
+
 On GitHub Pages it runs as a simulation. On localhost it calls the local backend and creates a prompt package.
 
 ## Local AI Backend
@@ -89,6 +103,10 @@ Each run is saved under `outputs/` and includes:
 - `generated_prompt/acceptance_checklist.md`
 - `generated_prompt/test_plan.md`
 - `generated_prompt/risk_notes.md`
+- `generated_prompt/scope.md`
+- `generated_prompt/output_contract.md`
+- `generated_prompt/security_notes.md`
+- `generated_prompt/quality_score.md`
 
 This keeps the learning version cheaper than calling one model per agent.
 

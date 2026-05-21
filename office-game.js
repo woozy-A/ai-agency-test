@@ -4,6 +4,13 @@ const positions = {
   mina: { home: [78, 34], meeting: [58, 56], mike: [55, 42], work: [78, 34], delivery: [84, 73] },
   jay: { home: [28, 74], meeting: [49, 68], mike: [49, 45], work: [28, 74], delivery: [73, 78] },
   yuna: { home: [67, 75], meeting: [58, 68], work: [67, 75], delivery: [88, 68] },
+  nora: { home: [37, 72], meeting: [45, 62], review: [61, 69], delivery: [80, 69] },
+  dana: { home: [22, 68], meeting: [47, 63], review: [64, 69], delivery: [76, 80] },
+  testkim: { home: [74, 70], meeting: [55, 66], review: [71, 68], delivery: [86, 79] },
+  jason: { home: [72, 80], meeting: [61, 66], review: [77, 68], delivery: [89, 72] },
+  sana: { home: [63, 80], meeting: [58, 72], review: [82, 67], delivery: [86, 62] },
+  iris: { home: [43, 23], meeting: [51, 53], review: [74, 76], delivery: [79, 83] },
+  vera: { home: [54, 23], meeting: [54, 53], review: [69, 80], delivery: [83, 84] },
   hallway: {
     boss: [30, 42],
     center: [52, 45],
@@ -18,6 +25,13 @@ const agentLabels = {
   mina: "Mina",
   jay: "Jay",
   yuna: "Yuna",
+  nora: "Nora",
+  dana: "Dana",
+  testkim: "Test Kim",
+  jason: "Jason",
+  sana: "Sana",
+  iris: "Iris",
+  vera: "Vera",
 };
 
 const els = {
@@ -144,7 +158,7 @@ function createSimulationArtifacts(request) {
         mode: "GitHub Pages simulation",
         goal: "Codex에 넣을 고품질 작업 프롬프트로 바꾸기",
         request: topic,
-        team: ["Mina: UX 요구사항", "Jay: 기술 지시", "Yuna: 검증 기준"],
+        team: ["Nora: 범위", "Mina: UX", "Dana/Jay: 실행성", "Test Kim/Yuna: 검증", "Jason/Sana/Vera: 위험과 점수"],
       },
       null,
       2
@@ -155,8 +169,8 @@ function createSimulationArtifacts(request) {
       "1. 창우의 과제를 목표/범위/산출물로 정리한다.",
       "2. Codex가 헷갈리지 않도록 성공 기준을 체크리스트로 만든다.",
       "3. Mina는 UX와 화면 요구사항을 쓴다.",
-      "4. Jay는 파일 구조와 구현 지시를 쓴다.",
-      "5. Yuna는 테스트 계획과 위험 요소를 검토한다.",
+      "4. Nora/Dana/Jay는 범위, 실행 환경, 구현 지시를 쓴다.",
+      "5. Test Kim/Yuna/Jason/Sana/Vera가 테스트, 위험, 보안, 품질 점수를 검토한다.",
     ].join("\n"),
     design: [
       "# Mina's Design Notes",
@@ -172,6 +186,7 @@ function createSimulationArtifacts(request) {
       "- 구현 전 성공 기준을 먼저 쓰게 한다.",
       "- 가능한 자동 테스트와 빌드 검증 명령을 포함한다.",
       "- 결과 보고 형식을 고정한다.",
+      "- output_contract.md로 Codex의 최종 보고 형식을 고정한다.",
     ].join("\n"),
     review: [
       "# Yuna's Review",
@@ -179,6 +194,7 @@ function createSimulationArtifacts(request) {
       "- 성공 기준이 검증 가능해야 한다.",
       "- 자동 검증/수동 검수/위험 항목을 구분해야 한다.",
       "- Codex가 임의로 다음 기능으로 넘어가지 않게 제한해야 한다.",
+      "- Jason은 실패 가능성만 지적하고, Vera는 품질 점수를 매긴다.",
     ].join("\n"),
     final: [
       "# Final Delivery",
@@ -190,6 +206,10 @@ function createSimulationArtifacts(request) {
       "- acceptance_checklist.md",
       "- test_plan.md",
       "- risk_notes.md",
+      "- scope.md",
+      "- output_contract.md",
+      "- security_notes.md",
+      "- quality_score.md",
       "",
       "로컬 실행판:",
       "`python3 server.py`로 열면 실제 AI가 Codex용 프롬프트 패키지를 만든다.",
@@ -226,7 +246,9 @@ function resetOffice() {
   pendingArtifacts = {};
   logs = [];
   activeArtifact = "log";
-  Object.entries(positions).forEach(([agentKey, points]) => setAgentPosition(agentKey, points.home));
+  Object.keys(els.agents).forEach((agentKey) => {
+    if (positions[agentKey]?.home) setAgentPosition(agentKey, positions[agentKey].home);
+  });
   Object.values(els.papers).forEach((paper) => paper.classList.remove("visible"));
   els.deliveryBox.classList.remove("complete");
   hideAllSpeech();
@@ -307,9 +329,16 @@ async function runOffice() {
   await Promise.all([
     moveAgentPath("mina", [positions.mina.mike, positions.mina.work], "Mina is designing"),
     moveAgentPath("jay", [positions.hallway.lower, positions.jay.work], "Jay is building"),
+    moveAgentPath("nora", [positions.nora.meeting, positions.nora.home], "Nora is trimming scope"),
+    moveAgentPath("dana", [positions.dana.meeting, positions.dana.home], "Dana is checking execution"),
     moveAgentPath("mike", [positions.hallway.center, positions.mike.home], "Mike is tracking progress"),
   ]);
-  await Promise.all([say("mina", "핵심 화면과 상태 기준을 정리했어요.", 1200), say("jay", "파일 구조와 테스트 명령을 넣었습니다.", 1200)]);
+  await Promise.all([
+    say("mina", "핵심 화면과 상태 기준을 정리했어요.", 1200),
+    say("jay", "파일 구조와 테스트 명령을 넣었습니다.", 1200),
+    say("nora", "이번 작업 범위와 제외 범위를 잘랐습니다.", 1200),
+    say("dana", "실행 명령과 환경 전제를 고정했어요.", 1200),
+  ]);
   artifacts.design = pendingArtifacts.design;
   addLog("Mina가 design artifact를 만들었습니다.");
   artifacts.dev = pendingArtifacts.dev;
@@ -319,9 +348,23 @@ async function runOffice() {
   await Promise.all([
     moveAgentPath("mike", [positions.hallway.center, positions.mike.review], "Mike is requesting review"),
     moveAgentPath("yuna", [positions.yuna.meeting, positions.yuna.work], "Yuna is reviewing"),
+    moveAgentPath("testkim", [positions.testkim.meeting, positions.testkim.review], "Test Kim is writing tests"),
+    moveAgentPath("jason", [positions.jason.meeting, positions.jason.review], "Jason is red-teaming"),
+    moveAgentPath("sana", [positions.sana.meeting, positions.sana.review], "Sana is checking safety"),
+    moveAgentPath("iris", [positions.iris.meeting, positions.iris.review], "Iris is editing prompt"),
+    moveAgentPath("vera", [positions.vera.meeting, positions.vera.review], "Vera is scoring quality"),
   ]);
   await say("mike", "Yuna, 검증 가능한 프롬프트인지 봐주세요.", 1200);
-  await say("yuna", "체크리스트, 테스트, 위험 항목을 나눠볼게요.", 1300);
+  await Promise.all([
+    say("yuna", "체크리스트, 테스트, 위험 항목을 나눠볼게요.", 1300),
+    say("testkim", "자동 테스트와 수동 검수를 분리합니다.", 1300),
+    say("jason", "망할 지점만 보겠습니다.", 1300),
+  ]);
+  await Promise.all([
+    say("sana", "비밀값과 위험 명령을 차단합니다.", 1200),
+    say("iris", "Codex가 오해하지 않게 문장을 다듬습니다.", 1200),
+    say("vera", "품질 점수와 blocking issue를 매깁니다.", 1200),
+  ]);
   addLog("Yuna가 프롬프트 패키지를 검토했습니다.");
 
   await Promise.all([
@@ -329,6 +372,8 @@ async function runOffice() {
     moveAgentPath("mina", [positions.hallway.delivery, positions.mina.delivery], "Team is preparing delivery"),
     moveAgentPath("jay", [positions.hallway.delivery, positions.jay.delivery], "Team is preparing delivery"),
     moveAgentPath("yuna", [positions.hallway.delivery, positions.yuna.delivery], "Team is preparing delivery"),
+    moveAgentPath("jason", [positions.hallway.delivery, positions.jason.delivery], "Red team signs off"),
+    moveAgentPath("vera", [positions.hallway.delivery, positions.vera.delivery], "Vera sends score"),
     moveAgentPath("changwoo", [positions.hallway.center, positions.hallway.delivery, positions.changwoo.delivery], "Changwoo is checking final delivery"),
   ]);
   artifacts.final = pendingArtifacts.final;
