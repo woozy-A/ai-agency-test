@@ -239,7 +239,7 @@ async function runOffice() {
     try {
       backendResult = await runBackendPipeline(request);
       pendingArtifacts = backendResult.artifacts;
-      addLog(`AI pipeline completed with ${backendResult.model}`);
+      addLog(`AI pipeline completed with ${backendResult.provider}/${backendResult.model}`);
       addLog(`결과 저장 위치: ${backendResult.output_dir}`);
     } catch (error) {
       artifacts.log = logs.concat([`ERROR. ${error.message}`]).join("\n");

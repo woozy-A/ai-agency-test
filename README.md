@@ -41,16 +41,22 @@ For the real local AI version, create `.env`:
 cp .env.example .env
 ```
 
-Then edit `.env` and set your API key:
+Then edit `.env` and set your API key. The default provider is Gemini because it has a free tier for learning:
 
 ```text
-OPENAI_API_KEY=your_api_key_here
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.0-flash
 ```
 
-Install the OpenAI Python package:
+Gemini mode uses Python's standard library, so no package install is required.
 
-```bash
-python3 -m pip install openai
+Optional OpenAI mode:
+
+```text
+AI_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4.1-mini
 ```
 
 Start the local backend:

@@ -8,12 +8,13 @@ import traceback
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parent
 OUTPUTS = ROOT / "outputs"
-MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
 
 def load_env() -> None:
@@ -31,8 +32,21 @@ def load_env() -> None:
         os.environ.setdefault(key, value)
 
 
-def require_openai_client():
+def get_provider() -> str:
     load_env()
+    return os.getenv("AI_PROVIDER", "gemini").strip().lower()
+
+
+def get_model() -> str:
+    provider = get_provider()
+    if provider == "openai":
+        return os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+    if provider == "gemini":
+        return os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    raise RuntimeError(f"지원하지 않는 AI_PROVIDER입니다: {provider}")
+
+
+def require_openai_client():
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError(
             "OPENAI_API_KEY가 없습니다. 프로젝트 루트에 .env 파일을 만들고 OPENAI_API_KEY=... 를 넣어주세요."
@@ -46,9 +60,9 @@ def require_openai_client():
     return OpenAI()
 
 
-def ask_agent(client, agent_name: str, role_prompt: str, user_prompt: str) -> str:
+def ask_openai_agent(client, agent_name: str, role_prompt: str, user_prompt: str) -> str:
     response = client.responses.create(
-        model=MODEL,
+        model=get_model(),
         input=[
             {
                 "role": "system",
@@ -64,6 +78,69 @@ def ask_agent(client, agent_name: str, role_prompt: str, user_prompt: str) -> st
     if not text:
         raise RuntimeError(f"{agent_name}가 빈 응답을 반환했습니다.")
     return text
+
+
+def ask_gemini_agent(agent_name: str, role_prompt: str, user_prompt: str) -> str:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "GEMINI_API_KEY가 없습니다. Google AI Studio에서 무료 API 키를 만든 뒤 .env에 GEMINI_API_KEY=... 를 넣어주세요."
+        )
+
+    model = get_model()
+    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    payload = {
+        "systemInstruction": {
+            "parts": [{"text": role_prompt}],
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": user_prompt}],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.7,
+        },
+    }
+    request = Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=120) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        if exc.code == 429:
+            raise RuntimeError(
+                "Gemini 무료 할당량 또는 분당 제한에 걸렸습니다. 잠시 후 다시 시도하거나, "
+                ".env의 GEMINI_MODEL을 다른 무료 지원 모델로 바꿔보세요. "
+                "자세한 원문 오류: " + error_body
+            ) from exc
+        raise RuntimeError(f"Gemini API 오류 {exc.code}: {error_body}") from exc
+
+    candidates = data.get("candidates", [])
+    if not candidates:
+        raise RuntimeError(f"{agent_name}가 응답 후보를 반환하지 않았습니다: {data}")
+
+    parts = candidates[0].get("content", {}).get("parts", [])
+    text = "\n".join(part.get("text", "") for part in parts).strip()
+    if not text:
+        raise RuntimeError(f"{agent_name}가 빈 응답을 반환했습니다.")
+    return text
+
+
+def ask_agent(client, agent_name: str, role_prompt: str, user_prompt: str) -> str:
+    provider = get_provider()
+    if provider == "openai":
+        return ask_openai_agent(client, agent_name, role_prompt, user_prompt)
+    if provider == "gemini":
+        return ask_gemini_agent(agent_name, role_prompt, user_prompt)
+    raise RuntimeError(f"지원하지 않는 AI_PROVIDER입니다: {provider}")
 
 
 def slugify(text: str) -> str:
@@ -87,7 +164,8 @@ def save_run(request: str, artifacts: dict[str, str]) -> Path:
 
 
 def run_ai_pipeline(request: str) -> dict:
-    client = require_openai_client()
+    provider = get_provider()
+    client = require_openai_client() if provider == "openai" else None
 
     mike_role = (
         "너는 AI 에이전시의 PM Mike다. 창우 사장의 요청을 실행 가능한 brief와 작업 계획으로 바꾼다. "
@@ -153,7 +231,8 @@ def run_ai_pipeline(request: str) -> dict:
 
     return {
         "ok": True,
-        "model": MODEL,
+        "provider": provider,
+        "model": get_model(),
         "output_dir": str(output_dir),
         "artifacts": artifacts,
     }
