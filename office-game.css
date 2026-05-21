@@ -45,7 +45,7 @@ textarea {
 
 .game-layout {
   display: grid;
-  grid-template-columns: 280px minmax(620px, 1fr) 340px;
+  grid-template-columns: 280px minmax(0, 1fr) 340px;
   gap: 14px;
   max-width: 1500px;
   margin: 0 auto;
@@ -191,6 +191,10 @@ button:disabled {
   min-width: 0;
 }
 
+.artifact-panel {
+  min-width: 0;
+}
+
 .hud {
   display: grid;
   grid-template-columns: 180px 1fr;
@@ -224,8 +228,8 @@ button:disabled {
 
 .office-map {
   position: relative;
-  aspect-ratio: 16 / 9;
-  min-height: 500px;
+  width: 100%;
+  height: clamp(420px, 56vw, 640px);
   overflow: hidden;
   border: 6px solid #15191f;
   background-color: var(--floor);
@@ -601,12 +605,13 @@ pre {
   }
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1360px) {
   .game-layout {
     grid-template-columns: 1fr;
   }
 
   .office-map {
+    height: min(66vw, 560px);
     min-height: 420px;
   }
 
@@ -621,7 +626,8 @@ pre {
   }
 
   .office-map {
-    min-height: 360px;
+    height: 420px;
+    min-height: 0;
   }
 
   .agent {
