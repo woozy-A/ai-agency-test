@@ -146,6 +146,10 @@
                   <textarea id="agentQuestion" rows="3">Dana DX의 역할이 뭔가요?</textarea>
                   <button id="askAgentButton" type="submit">Ask <span id="selectedAgentLabel">Dana</span></button>
                 </form>
+                <div class="chat-actions">
+                  <button id="exportChatButton" class="secondary compact" type="button">Export</button>
+                  <button id="clearChatButton" class="secondary compact" type="button">Clear</button>
+                </div>
                 <p class="agent-chat-status" id="agentChatStatus">Dana DX 선택됨</p>
                 <div class="agent-chat-log" id="agentChatLog" aria-live="polite"></div>
               </div>
@@ -188,7 +192,7 @@
             <div class="rug rug-meeting"></div>
             <div class="bookshelf bookshelf-left"></div>
             <div class="bookshelf bookshelf-right"></div>
-            <div class="whiteboard whiteboard-main">SCORE</div>
+            <div class="whiteboard whiteboard-main" id="scoreBoard">SCORE<br /><strong>--</strong></div>
             <div class="sofa sofa-lounge"></div>
             <div class="water-cooler"></div>
             <div class="plant plant-a"></div>

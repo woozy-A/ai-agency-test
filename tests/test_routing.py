@@ -1,6 +1,13 @@
 import unittest
 
-from server import AGENT_ROLES, detect_project_type, normalize_artifacts, project_file_contract
+from server import (
+    AGENT_ROLES,
+    detect_project_type,
+    extract_quality_score,
+    get_model_candidates,
+    normalize_artifacts,
+    project_file_contract,
+)
 
 
 class ProjectRoutingTest(unittest.TestCase):
@@ -48,6 +55,17 @@ class ProjectRoutingTest(unittest.TestCase):
     def test_agent_chat_roles_include_dx_and_red_team(self):
         self.assertEqual(AGENT_ROLES["dana"]["role"], "Developer Experience")
         self.assertIn("실패 가능성", AGENT_ROLES["jason"]["prompt"])
+
+    def test_extracts_quality_score_from_prompt_package(self):
+        score = extract_quality_score(
+            [{"path": "generated_prompt/quality_score.md", "content": "Total: 91/100\nGood"}],
+            {},
+        )
+        self.assertEqual(score["score"], 91)
+
+    def test_model_candidates_include_primary_first(self):
+        candidates = get_model_candidates("gemini-2.5-flash-lite")
+        self.assertEqual(candidates[0], "gemini-2.5-flash-lite")
 
 
 if __name__ == "__main__":

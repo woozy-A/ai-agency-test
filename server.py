@@ -53,6 +53,23 @@ def get_model() -> str:
     raise RuntimeError(f"지원하지 않는 AI_PROVIDER입니다: {provider}")
 
 
+def get_model_candidates(primary_model: str) -> list[str]:
+    provider = get_provider()
+    models = [primary_model]
+    if provider == "gemini":
+        fallback_raw = os.getenv("GEMINI_FALLBACK_MODELS", "gemini-2.0-flash-lite,gemini-2.0-flash")
+    elif provider == "openai":
+        fallback_raw = os.getenv("OPENAI_FALLBACK_MODELS", "")
+    else:
+        fallback_raw = ""
+
+    for item in fallback_raw.split(","):
+        candidate = item.strip()
+        if candidate and candidate not in models:
+            models.append(candidate)
+    return models
+
+
 def get_agent_model(agent_key: str) -> str:
     env_key = f"{agent_key.upper()}_MODEL"
     return os.getenv(env_key, get_model())
@@ -166,10 +183,41 @@ def ask_agent(client, agent_name: str, role_prompt: str, user_prompt: str, model
     provider = get_provider()
     model = model or get_model()
     if provider == "openai":
-        return ask_openai_agent(client, agent_name, role_prompt, user_prompt, model)
+        last_error = None
+        for candidate in get_model_candidates(model):
+            try:
+                return ask_openai_agent(client, agent_name, role_prompt, user_prompt, candidate)
+            except Exception as exc:
+                last_error = exc
+        raise last_error or RuntimeError(f"{agent_name} OpenAI 호출에 실패했습니다.")
     if provider == "gemini":
-        return ask_gemini_agent(agent_name, role_prompt, user_prompt, model)
+        last_error = None
+        for candidate in get_model_candidates(model):
+            try:
+                return ask_gemini_agent(agent_name, role_prompt, user_prompt, candidate)
+            except (RetryableAIError, RuntimeError) as exc:
+                last_error = exc
+                if not is_model_fallback_error(exc):
+                    raise
+        raise last_error or RuntimeError(f"{agent_name} Gemini 호출에 실패했습니다.")
     raise RuntimeError(f"지원하지 않는 AI_PROVIDER입니다: {provider}")
+
+
+def is_model_fallback_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "429",
+            "503",
+            "quota",
+            "rate",
+            "할당량",
+            "분당 제한",
+            "혼잡",
+            "unavailable",
+        )
+    )
 
 
 def extract_json_object(text: str) -> dict:
@@ -384,6 +432,25 @@ def save_run(request: str, artifacts: dict[str, str], files: list[dict[str, str]
     return output_dir
 
 
+def extract_quality_score(files: list[dict[str, str]], artifacts: dict[str, str]) -> dict | None:
+    sources = []
+    for item in files:
+        if item["path"].endswith("quality_score.md"):
+            sources.append(item["content"])
+    sources.extend([artifacts.get("review", ""), artifacts.get("final", "")])
+
+    for source in sources:
+        if not source:
+            continue
+        match = re.search(r"(\d{1,3})\s*/\s*100", source)
+        if not match:
+            match = re.search(r"(?:총점|점수|score|total)[^\d]{0,12}(\d{1,3})", source, re.IGNORECASE)
+        if match:
+            score = max(0, min(100, int(match.group(1))))
+            return {"score": score, "text": source[:1200]}
+    return None
+
+
 def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
     project_type = detect_project_type(request)
     role_prompt = (
@@ -557,10 +624,12 @@ def run_ai_pipeline(request: str) -> dict:
         "project_type": detect_project_type(request),
         "provider": provider,
         "model": model_summary,
+        "model_candidates": get_model_candidates(get_model()),
         "mode": mode,
         "calls": calls,
         "output_dir": str(output_dir),
         "files": [item["path"] for item in files],
+        "quality_score": extract_quality_score(files, artifacts),
         "artifacts": artifacts,
     }
 

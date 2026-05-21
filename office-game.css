@@ -136,6 +136,11 @@ button.secondary {
   color: var(--ink);
 }
 
+button.compact {
+  min-height: 34px;
+  font-size: 12px;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
@@ -338,6 +343,13 @@ button:disabled {
 .agent-chat textarea {
   min-height: 78px;
   resize: vertical;
+}
+
+.chat-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 0 10px 10px;
 }
 
 .agent-chat-status {
@@ -684,6 +696,14 @@ button:disabled {
   font-size: 13px;
   font-weight: 900;
   box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.2);
+  line-height: 1.15;
+  text-align: center;
+}
+
+.whiteboard strong {
+  display: block;
+  color: #1d6840;
+  font-size: 18px;
 }
 
 .sofa {

@@ -82,8 +82,11 @@ const els = {
   agentChatStatus: document.querySelector("#agentChatStatus"),
   agentChatLog: document.querySelector("#agentChatLog"),
   askAgentButton: document.querySelector("#askAgentButton"),
+  exportChatButton: document.querySelector("#exportChatButton"),
+  clearChatButton: document.querySelector("#clearChatButton"),
   selectedAgentLabel: document.querySelector("#selectedAgentLabel"),
   deliveryBox: document.querySelector("#deliveryBox"),
+  scoreBoard: document.querySelector("#scoreBoard"),
   tabs: Array.from(document.querySelectorAll(".artifact-tab")),
   papers: {
     request: document.querySelector("#requestPaper"),
@@ -123,6 +126,46 @@ function loadChatHistory() {
 
 function saveChatHistory() {
   window.localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(chatHistory.slice(-80)));
+}
+
+function formatChatHistoryMarkdown() {
+  if (!chatHistory.length) return "# Changwoo Prompt Agency Chat Log\n\n아직 기록이 없습니다.\n";
+  const lines = ["# Changwoo Prompt Agency Chat Log", ""];
+  chatHistory.forEach((item, index) => {
+    lines.push(`## ${index + 1}. ${item.agentName} ${item.agentRole}`);
+    lines.push("");
+    lines.push(`- Time: ${item.time}`);
+    lines.push(`- Agent: ${item.agent}`);
+    lines.push("");
+    lines.push("### Question");
+    lines.push(item.question);
+    lines.push("");
+    lines.push("### Answer");
+    lines.push(item.answer);
+    lines.push("");
+  });
+  return lines.join("\n");
+}
+
+function exportChatHistory() {
+  const blob = new Blob([formatChatHistoryMarkdown()], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  link.href = url;
+  link.download = `changwoo-agent-chat-${stamp}.md`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function clearChatHistory() {
+  if (chatHistory.length && !window.confirm("직원 질문 기록을 모두 삭제할까요? 내보내지 않은 기록은 사라집니다.")) return;
+  chatHistory = [];
+  window.localStorage.removeItem(CHAT_HISTORY_KEY);
+  renderChatHistory();
+  els.agentChatStatus.textContent = "질문 기록을 비웠습니다.";
 }
 
 function renderChatHistory() {
@@ -312,6 +355,8 @@ function createSimulationArtifacts(request) {
       "- 자동 검증/수동 검수/위험 항목을 구분해야 한다.",
       "- Codex가 임의로 다음 기능으로 넘어가지 않게 제한해야 한다.",
       "- Jason은 실패 가능성만 지적하고, Vera는 품질 점수를 매긴다.",
+      "",
+      "Vera score: 88/100",
     ].join("\n"),
     final: [
       "# Final Delivery",
@@ -331,6 +376,7 @@ function createSimulationArtifacts(request) {
       "로컬 실행판:",
       "`python3 server.py`로 열면 실제 AI가 Codex용 프롬프트 패키지를 만든다.",
     ].join("\n"),
+    qualityScore: 88,
   };
 }
 
@@ -351,6 +397,30 @@ function renderArtifact() {
   els.tabs.forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.artifact === activeArtifact);
   });
+}
+
+function setScoreBoard(score, label = "SCORE") {
+  const value = typeof score === "number" ? `${score}/100` : "--";
+  els.scoreBoard.innerHTML = `${label}<br><strong>${value}</strong>`;
+}
+
+function parseScoreFromText(text) {
+  if (!text) return null;
+  const slash = text.match(/(\d{1,3})\s*\/\s*100/);
+  const named = text.match(/(?:총점|점수|score|total)[^\d]{0,12}(\d{1,3})/i);
+  const raw = slash?.[1] || named?.[1];
+  if (!raw) return null;
+  return Math.max(0, Math.min(100, Number(raw)));
+}
+
+function updateScoreFromResult(result, fallbackArtifacts = {}) {
+  const apiScore = result?.quality_score?.score;
+  if (typeof apiScore === "number") {
+    setScoreBoard(apiScore, "VERA");
+    return;
+  }
+  const parsed = parseScoreFromText([fallbackArtifacts.review, fallbackArtifacts.final, fallbackArtifacts.dev].join("\n"));
+  setScoreBoard(parsed, parsed === null ? "SCORE" : "VERA");
 }
 
 function toggleArtifactPanel(forceOpen) {
@@ -400,6 +470,7 @@ function resetOffice() {
   els.deliveryBox.classList.remove("complete");
   hideAllSpeech();
   setActiveAgent(null);
+  setScoreBoard(null);
   setTask("Idle", "Waiting for request");
   selectAgent("dana", false);
   els.teamDrawer.removeAttribute("open");
@@ -455,6 +526,9 @@ async function runOffice() {
         addLog(`프로젝트 타입: ${backendResult.project_type}`);
       }
       addLog(`모델: ${backendResult.model}`);
+      if (backendResult.model_candidates && backendResult.model_candidates.length > 1) {
+        addLog(`대기 모델: ${backendResult.model_candidates.join(" -> ")}`);
+      }
       addLog(`실제 API 호출 수: ${backendResult.calls || 1}`);
       addLog(`결과 저장 위치: ${backendResult.output_dir}`);
       if (backendResult.files && backendResult.files.length) {
@@ -472,8 +546,10 @@ async function runOffice() {
     }
   } else {
     pendingArtifacts = createSimulationArtifacts(request);
+    backendResult = { quality_score: { score: pendingArtifacts.qualityScore } };
     addLog("공개 링크에서는 시뮬레이션 모드로 실행됩니다.");
   }
+  updateScoreFromResult(backendResult, pendingArtifacts);
   artifacts.brief = pendingArtifacts.brief;
   addLog("Mike가 과제를 brief로 정리했습니다.");
   showPaper("brief");
@@ -607,6 +683,8 @@ els.agentChatForm.addEventListener("submit", async (event) => {
   }
 });
 
+els.exportChatButton.addEventListener("click", exportChatHistory);
+els.clearChatButton.addEventListener("click", clearChatHistory);
 els.artifactToggle.addEventListener("click", () => toggleArtifactPanel());
 els.startButton.addEventListener("click", runOffice);
 els.resetButton.addEventListener("click", resetOffice);
