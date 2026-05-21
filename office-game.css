@@ -429,13 +429,13 @@ button:disabled {
   height: 76px;
   transform: translate(-50%, -50%);
   transition:
-    left 780ms steps(8),
-    top 780ms steps(8);
+    left 640ms steps(10),
+    top 640ms steps(10);
   z-index: 10;
 }
 
 .agent.walking .sprite {
-  animation: walk 300ms steps(2) infinite;
+  animation: walk 260ms steps(2) infinite;
 }
 
 .agent strong {
@@ -454,46 +454,66 @@ button:disabled {
   position: absolute;
   left: 50%;
   bottom: 14px;
-  width: 32px;
-  height: 44px;
+  width: 34px;
+  height: 46px;
   transform: translateX(-50%);
-  background: var(--agent-color);
   border: 4px solid #15191f;
+  background:
+    linear-gradient(90deg, transparent 0 5px, #15191f 5px 9px, transparent 9px 25px, #15191f 25px 29px, transparent 29px),
+    linear-gradient(var(--agent-accent) 0 11px, var(--agent-color) 11px 29px, #263241 29px 46px);
   box-shadow:
-    -10px 8px 0 -4px #15191f,
-    10px 8px 0 -4px #15191f,
-    0 -18px 0 -2px #f0c19a,
-    0 -18px 0 2px #15191f;
+    -13px 12px 0 -5px #15191f,
+    13px 12px 0 -5px #15191f,
+    -7px 38px 0 -3px #15191f,
+    7px 38px 0 -3px #15191f,
+    0 -20px 0 -2px #f0c19a,
+    0 -20px 0 2px #15191f,
+    0 -29px 0 -7px var(--hair-color),
+    0 -29px 0 -3px #15191f;
 }
 
 .sprite span {
   position: absolute;
-  left: 6px;
-  top: -21px;
-  width: 6px;
-  height: 6px;
+  left: 7px;
+  top: -23px;
+  width: 5px;
+  height: 5px;
   background: #15191f;
-  box-shadow: 14px 0 0 #15191f;
+  box-shadow:
+    14px 0 0 #15191f,
+    7px 8px 0 -1px #9d4d3f,
+    0 16px 0 -1px var(--agent-accent),
+    14px 16px 0 -1px var(--agent-accent);
 }
 
 .boss-agent {
   --agent-color: var(--boss);
+  --agent-accent: #ffd966;
+  --hair-color: #2a1f19;
 }
 
 .pm-agent {
   --agent-color: var(--pm);
+  --agent-accent: #dce8ff;
+  --hair-color: #1b2433;
 }
 
 .design-agent {
   --agent-color: var(--design);
+  --agent-accent: #ffe4c1;
+  --hair-color: #7d4a28;
 }
 
 .dev-agent {
   --agent-color: var(--dev);
+  --agent-accent: #c8f2dc;
+  --hair-color: #2c2c2c;
 }
 
 .review-agent {
   --agent-color: var(--review);
+  --agent-accent: #eadcff;
+  --hair-color: #4e347a;
 }
 
 .speech {
@@ -502,7 +522,7 @@ button:disabled {
   bottom: 68px;
   display: none;
   min-width: 132px;
-  max-width: 190px;
+  max-width: 220px;
   padding: 8px 10px;
   transform: translateX(-50%);
   border: 3px solid #15191f;
@@ -512,10 +532,12 @@ button:disabled {
   font-weight: 800;
   line-height: 1.3;
   box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.25);
+  z-index: 20;
 }
 
 .speech.show {
   display: block;
+  animation: bubble-in 160ms steps(2);
 }
 
 .speech::after {
@@ -586,11 +608,23 @@ pre {
 
 @keyframes walk {
   0% {
-    transform: translateX(-50%) translateY(0);
+    transform: translateX(-50%) translateY(0) skewX(-2deg);
   }
 
   100% {
-    transform: translateX(-50%) translateY(-3px);
+    transform: translateX(-50%) translateY(-4px) skewX(2deg);
+  }
+}
+
+@keyframes bubble-in {
+  0% {
+    transform: translateX(-50%) translateY(6px);
+    opacity: 0;
+  }
+
+  100% {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
   }
 }
 
