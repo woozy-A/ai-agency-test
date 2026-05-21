@@ -1,6 +1,6 @@
 import unittest
 
-from server import detect_project_type, normalize_artifacts, project_file_contract
+from server import AGENT_ROLES, detect_project_type, normalize_artifacts, project_file_contract
 
 
 class ProjectRoutingTest(unittest.TestCase):
@@ -44,6 +44,10 @@ class ProjectRoutingTest(unittest.TestCase):
         contract = project_file_contract("web_static")
         self.assertIn("Codex가 만들 결과물", contract)
         self.assertIn("앱 코드를 직접 납품하지 말고", contract)
+
+    def test_agent_chat_roles_include_dx_and_red_team(self):
+        self.assertEqual(AGENT_ROLES["dana"]["role"], "Developer Experience")
+        self.assertIn("실패 가능성", AGENT_ROLES["jason"]["prompt"])
 
 
 if __name__ == "__main__":

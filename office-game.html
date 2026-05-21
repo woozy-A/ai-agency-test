@@ -23,93 +23,23 @@
             <button id="resetButton" class="secondary" type="button">Reset</button>
           </div>
 
-          <section class="team-list" aria-label="AI agents">
-            <h2>Team</h2>
-            <div class="team-member" data-agent-card="changwoo">
-              <span class="swatch boss"></span>
-              <div>
-                <strong>창우</strong>
-                <small>Boss</small>
-              </div>
+          <aside class="artifact-panel" id="artifactPanel">
+            <div class="panel-head">
+              <button id="artifactToggle" class="artifact-toggle" type="button" aria-expanded="true">
+                <span>Artifacts</span>
+                <strong id="artifactCount">0/6</strong>
+              </button>
             </div>
-            <div class="team-member" data-agent-card="mike">
-              <span class="swatch pm"></span>
-              <div>
-                <strong>Mike</strong>
-                <small>PM</small>
-              </div>
+            <div class="artifact-tabs">
+              <button class="artifact-tab active" data-artifact="log">Log</button>
+              <button class="artifact-tab" data-artifact="brief">Brief</button>
+              <button class="artifact-tab" data-artifact="plan">Plan</button>
+              <button class="artifact-tab" data-artifact="design">UX</button>
+              <button class="artifact-tab" data-artifact="dev">Prompt</button>
+              <button class="artifact-tab" data-artifact="final">Final</button>
             </div>
-            <div class="team-member" data-agent-card="mina">
-              <span class="swatch design"></span>
-              <div>
-                <strong>Mina</strong>
-                <small>UX Planner</small>
-              </div>
-            </div>
-            <div class="team-member" data-agent-card="jay">
-              <span class="swatch dev"></span>
-              <div>
-                <strong>Jay</strong>
-                <small>Tech Writer</small>
-              </div>
-            </div>
-            <div class="team-member" data-agent-card="yuna">
-              <span class="swatch review"></span>
-              <div>
-                <strong>Yuna</strong>
-                <small>QA Reviewer</small>
-              </div>
-            </div>
-            <div class="team-member" data-agent-card="nora">
-              <span class="swatch scope"></span>
-              <div>
-                <strong>Nora</strong>
-                <small>Scope</small>
-              </div>
-            </div>
-            <div class="team-member" data-agent-card="dana">
-              <span class="swatch dx"></span>
-              <div>
-                <strong>Dana</strong>
-                <small>DX</small>
-              </div>
-            </div>
-            <div class="team-member" data-agent-card="testkim">
-              <span class="swatch qa"></span>
-              <div>
-                <strong>Test Kim</strong>
-                <small>QA</small>
-              </div>
-            </div>
-            <div class="team-member" data-agent-card="jason">
-              <span class="swatch redteam"></span>
-              <div>
-                <strong>Jason</strong>
-                <small>Red Team</small>
-              </div>
-            </div>
-            <div class="team-member" data-agent-card="sana">
-              <span class="swatch security"></span>
-              <div>
-                <strong>Sana</strong>
-                <small>Security</small>
-              </div>
-            </div>
-            <div class="team-member" data-agent-card="iris">
-              <span class="swatch editor"></span>
-              <div>
-                <strong>Iris</strong>
-                <small>Editor</small>
-              </div>
-            </div>
-            <div class="team-member" data-agent-card="vera">
-              <span class="swatch judge"></span>
-              <div>
-                <strong>Vera</strong>
-                <small>Judge</small>
-              </div>
-            </div>
-          </section>
+            <pre id="artifactOutput">아직 실행 전입니다.</pre>
+          </aside>
         </aside>
 
         <section class="office-wrap">
@@ -122,6 +52,103 @@
               <span>Current task</span>
               <strong id="taskText">Waiting for request</strong>
             </div>
+            <details class="team-drawer">
+              <summary>Team</summary>
+              <div class="team-drawer-body">
+                <section class="team-list" aria-label="AI agents">
+                  <button class="team-member" type="button" data-agent-card="changwoo">
+                    <span class="swatch boss"></span>
+                    <span>
+                      <strong>창우</strong>
+                      <small>Boss</small>
+                    </span>
+                  </button>
+                  <button class="team-member" type="button" data-agent-card="mike">
+                    <span class="swatch pm"></span>
+                    <span>
+                      <strong>Mike</strong>
+                      <small>PM</small>
+                    </span>
+                  </button>
+                  <button class="team-member" type="button" data-agent-card="mina">
+                    <span class="swatch design"></span>
+                    <span>
+                      <strong>Mina</strong>
+                      <small>UX Planner</small>
+                    </span>
+                  </button>
+                  <button class="team-member" type="button" data-agent-card="jay">
+                    <span class="swatch dev"></span>
+                    <span>
+                      <strong>Jay</strong>
+                      <small>Tech Writer</small>
+                    </span>
+                  </button>
+                  <button class="team-member" type="button" data-agent-card="yuna">
+                    <span class="swatch review"></span>
+                    <span>
+                      <strong>Yuna</strong>
+                      <small>QA Reviewer</small>
+                    </span>
+                  </button>
+                  <button class="team-member" type="button" data-agent-card="nora">
+                    <span class="swatch scope"></span>
+                    <span>
+                      <strong>Nora</strong>
+                      <small>Scope</small>
+                    </span>
+                  </button>
+                  <button class="team-member" type="button" data-agent-card="dana">
+                    <span class="swatch dx"></span>
+                    <span>
+                      <strong>Dana</strong>
+                      <small>DX</small>
+                    </span>
+                  </button>
+                  <button class="team-member" type="button" data-agent-card="testkim">
+                    <span class="swatch qa"></span>
+                    <span>
+                      <strong>Test Kim</strong>
+                      <small>QA</small>
+                    </span>
+                  </button>
+                  <button class="team-member" type="button" data-agent-card="jason">
+                    <span class="swatch redteam"></span>
+                    <span>
+                      <strong>Jason</strong>
+                      <small>Red Team</small>
+                    </span>
+                  </button>
+                  <button class="team-member" type="button" data-agent-card="sana">
+                    <span class="swatch security"></span>
+                    <span>
+                      <strong>Sana</strong>
+                      <small>Security</small>
+                    </span>
+                  </button>
+                  <button class="team-member" type="button" data-agent-card="iris">
+                    <span class="swatch editor"></span>
+                    <span>
+                      <strong>Iris</strong>
+                      <small>Editor</small>
+                    </span>
+                  </button>
+                  <button class="team-member" type="button" data-agent-card="vera">
+                    <span class="swatch judge"></span>
+                    <span>
+                      <strong>Vera</strong>
+                      <small>Judge</small>
+                    </span>
+                  </button>
+                </section>
+                <form class="agent-chat" id="agentChatForm">
+                  <label for="agentQuestion">직원에게 질문</label>
+                  <textarea id="agentQuestion" rows="3">Dana DX의 역할이 뭔가요?</textarea>
+                  <button id="askAgentButton" type="submit">Ask <span id="selectedAgentLabel">Dana</span></button>
+                </form>
+                <pre class="agent-answer" id="agentAnswer">팀원을 클릭하면 그 직원에게 질문할 수 있습니다.</pre>
+              </div>
+            </details>
           </div>
 
           <div class="office-map" id="officeMap" aria-label="Pixel office map">
@@ -239,23 +266,6 @@
           </div>
         </section>
 
-        <aside class="artifact-panel" id="artifactPanel">
-          <div class="panel-head">
-            <button id="artifactToggle" class="artifact-toggle" type="button" aria-expanded="false">
-              <span>Artifacts</span>
-              <strong id="artifactCount">0/6</strong>
-            </button>
-          </div>
-          <div class="artifact-tabs">
-            <button class="artifact-tab active" data-artifact="log">Log</button>
-            <button class="artifact-tab" data-artifact="brief">Brief</button>
-            <button class="artifact-tab" data-artifact="plan">Plan</button>
-            <button class="artifact-tab" data-artifact="design">UX</button>
-            <button class="artifact-tab" data-artifact="dev">Prompt</button>
-            <button class="artifact-tab" data-artifact="final">Final</button>
-          </div>
-          <pre id="artifactOutput">아직 실행 전입니다.</pre>
-        </aside>
       </section>
     </main>
 

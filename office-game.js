@@ -34,6 +34,36 @@ const agentLabels = {
   vera: "Vera",
 };
 
+const agentRoles = {
+  changwoo: "Boss",
+  mike: "PM",
+  mina: "UX Planner",
+  jay: "Tech Writer",
+  yuna: "QA Reviewer",
+  nora: "Scope Manager",
+  dana: "Developer Experience",
+  testkim: "QA Engineer",
+  jason: "Red Team",
+  sana: "Security",
+  iris: "Prompt Editor",
+  vera: "Validation Judge",
+};
+
+const simulationAnswers = {
+  changwoo: "나는 최종 의사결정자 역할이야. 지금 봐야 할 건 재미보다도 이 도구가 Codex에 넣을 좋은 프롬프트를 안정적으로 뽑는지야.",
+  mike: "PM은 요청을 목표, 범위, 산출물, 우선순위로 바꾸는 역할입니다. Codex가 어디까지 해야 하는지 먼저 정리합니다.",
+  mina: "UX는 사용자가 실제로 보게 될 흐름과 화면 상태를 정리합니다. 빈 상태, 오류 상태, 확인해야 할 핵심 화면을 놓치지 않게 합니다.",
+  jay: "제 역할은 Codex가 바로 실행할 수 있게 파일 구조, 구현 순서, 명령어, 테스트 지시를 구체화하는 것입니다.",
+  yuna: "QA는 결과가 맞는지 증명하는 역할입니다. 자동 검증 완료 항목, 직접 검수할 항목, 위험한 항목을 분리합니다.",
+  nora: "Scope는 일을 줄이는 역할입니다. 이번에 할 것과 하지 않을 것을 나눠서 Codex가 쓸데없이 커지지 않게 막습니다.",
+  dana: "DX는 개발자 경험 담당입니다. 실행 방법, 환경 전제, 오류 메시지, 재현 가능한 명령어를 쉽게 만드는 역할입니다.",
+  testkim: "QA Engineer는 자동화 가능한 검증을 담당합니다. 테스트 명령, 실패 조건, 수동 검수 시나리오를 구분합니다.",
+  jason: "Red Team은 위험만 봅니다. 요구사항이 모호한 곳, 실패할 가능성, 결과물이 허접해질 지점을 먼저 지적합니다.",
+  sana: "Security는 API 키, .env, 개인정보, 위험 명령을 봅니다. 공개 저장소에 비밀값이 올라가지 않게 막는 역할입니다.",
+  iris: "Prompt Editor는 문장을 다듬습니다. Codex가 오해할 표현을 줄이고, 산출물 형식과 보고 방식을 명확하게 만듭니다.",
+  vera: "Validation Judge는 점수를 매깁니다. 명확성, 범위, 테스트 가능성, 안전성, Codex 사용성을 기준으로 통과 여부를 판단합니다.",
+};
+
 const els = {
   requestInput: document.querySelector("#requestInput"),
   startButton: document.querySelector("#startButton"),
@@ -44,6 +74,12 @@ const els = {
   artifactCount: document.querySelector("#artifactCount"),
   artifactPanel: document.querySelector("#artifactPanel"),
   artifactToggle: document.querySelector("#artifactToggle"),
+  teamDrawer: document.querySelector(".team-drawer"),
+  agentChatForm: document.querySelector("#agentChatForm"),
+  agentQuestion: document.querySelector("#agentQuestion"),
+  agentAnswer: document.querySelector("#agentAnswer"),
+  askAgentButton: document.querySelector("#askAgentButton"),
+  selectedAgentLabel: document.querySelector("#selectedAgentLabel"),
   deliveryBox: document.querySelector("#deliveryBox"),
   tabs: Array.from(document.querySelectorAll(".artifact-tab")),
   papers: {
@@ -65,6 +101,7 @@ let pendingArtifacts = {};
 let logs = [];
 let activeArtifact = "log";
 let running = false;
+let selectedAgent = "dana";
 
 function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -79,6 +116,19 @@ function setAgentPosition(agentKey, point) {
 function setActiveAgent(agentKey) {
   Object.values(els.cards).forEach((card) => card.classList.remove("active"));
   if (agentKey) els.cards[agentKey].classList.add("active");
+}
+
+function selectAgent(agentKey, announce = true) {
+  if (!els.agents[agentKey]) return;
+  selectedAgent = agentKey;
+  setActiveAgent(agentKey);
+  els.selectedAgentLabel.textContent = agentLabels[agentKey];
+  if (announce) {
+    const line = `${agentLabels[agentKey]} ${agentRoles[agentKey]} 선택됨`;
+    els.agentAnswer.textContent = `${line}\n질문을 입력하고 Ask를 누르면 답변합니다.`;
+    showSpeech(agentKey, "저에게 물어보세요.");
+    window.setTimeout(() => hideSpeech(agentKey), 1200);
+  }
 }
 
 function setTask(status, task) {
@@ -239,9 +289,33 @@ function renderArtifact() {
 }
 
 function toggleArtifactPanel(forceOpen) {
-  const shouldOpen = typeof forceOpen === "boolean" ? forceOpen : !els.artifactPanel.classList.contains("open");
-  els.artifactPanel.classList.toggle("open", shouldOpen);
+  const shouldOpen = typeof forceOpen === "boolean" ? forceOpen : els.artifactPanel.classList.contains("collapsed");
+  els.artifactPanel.classList.toggle("collapsed", !shouldOpen);
   els.artifactToggle.setAttribute("aria-expanded", String(shouldOpen));
+}
+
+async function askSelectedAgent(question) {
+  if (!shouldUseBackend()) {
+    await sleep(250);
+    return {
+      answer: simulationAnswers[selectedAgent] || "공개 링크에서는 데모 답변만 가능합니다. 로컬 서버를 켜면 실제 모델 답변을 받을 수 있습니다.",
+      provider: "simulation",
+      model: "github-pages",
+    };
+  }
+
+  const response = await fetch("/api/agent-chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ agent: selectedAgent, question }),
+  });
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error || "Agent chat failed");
+  }
+  return payload;
 }
 
 function showPaper(key) {
@@ -262,7 +336,9 @@ function resetOffice() {
   hideAllSpeech();
   setActiveAgent(null);
   setTask("Idle", "Waiting for request");
-  toggleArtifactPanel(false);
+  selectAgent("dana", false);
+  els.teamDrawer.removeAttribute("open");
+  toggleArtifactPanel(true);
   updateArtifactCount();
   renderArtifact();
   els.startButton.disabled = false;
@@ -406,6 +482,42 @@ els.tabs.forEach((tab) => {
     activeArtifact = tab.dataset.artifact;
     renderArtifact();
   });
+});
+
+Object.entries(els.cards).forEach(([agentKey, card]) => {
+  card.addEventListener("click", () => selectAgent(agentKey));
+});
+
+Object.entries(els.agents).forEach(([agentKey, agent]) => {
+  agent.addEventListener("click", () => {
+    els.teamDrawer.setAttribute("open", "");
+    selectAgent(agentKey);
+  });
+});
+
+els.agentChatForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const question = els.agentQuestion.value.trim();
+  if (!question) return;
+  els.askAgentButton.disabled = true;
+  els.agentAnswer.textContent = `${agentLabels[selectedAgent]}에게 질문 중...`;
+  setTask("Asking", `${agentLabels[selectedAgent]} is answering`);
+  showSpeech(selectedAgent, "잠깐만요. 답변 정리 중입니다.");
+  try {
+    const payload = await askSelectedAgent(question);
+    const source = payload.provider ? `\n\n(${payload.provider}/${payload.model})` : "";
+    els.agentAnswer.textContent = payload.answer + source;
+    showSpeech(selectedAgent, "답변했습니다.");
+    addLog(`${agentLabels[selectedAgent]}가 질문에 답변했습니다.`);
+  } catch (error) {
+    els.agentAnswer.textContent = `ERROR. ${error.message}`;
+    showSpeech(selectedAgent, "오류가 났어요.");
+  } finally {
+    await sleep(900);
+    hideSpeech(selectedAgent);
+    setTask(running ? "Running" : "Idle", running ? "Pipeline is running" : "Waiting for request");
+    els.askAgentButton.disabled = false;
+  }
 });
 
 els.artifactToggle.addEventListener("click", () => toggleArtifactPanel());

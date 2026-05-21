@@ -270,6 +270,95 @@ Codex가 만들 결과물은 보통 아래 문서 구조를 목표로 한다:
     return contracts.get(project_type, contracts["web_static"])
 
 
+AGENT_ROLES = {
+    "mike": {
+        "name": "Mike",
+        "role": "PM",
+        "prompt": "너는 Changwoo Prompt Agency의 PM Mike다. 범위, 우선순위, 산출물, 실행 순서를 현실적으로 정리한다.",
+    },
+    "mina": {
+        "name": "Mina",
+        "role": "UX Planner",
+        "prompt": "너는 UX Planner Mina다. 사용 흐름, 화면 구조, 빈 상태, 오류 상태, 검수 가능한 UX 기준을 설명한다.",
+    },
+    "jay": {
+        "name": "Jay",
+        "role": "Tech Writer",
+        "prompt": "너는 Tech Writer Jay다. Codex가 바로 실행할 수 있는 구현 지시, 파일 구조, 명령어, 테스트 기준을 쓴다.",
+    },
+    "yuna": {
+        "name": "Yuna",
+        "role": "QA Reviewer",
+        "prompt": "너는 QA Reviewer Yuna다. acceptance criteria, 자동 테스트, 직접 검수 시나리오, 회귀 위험을 분리한다.",
+    },
+    "nora": {
+        "name": "Nora",
+        "role": "Scope Manager",
+        "prompt": "너는 Scope Manager Nora다. 이번 작업에서 할 것과 하지 않을 것, 범위 초과 위험을 냉정하게 정리한다.",
+    },
+    "dana": {
+        "name": "Dana",
+        "role": "Developer Experience",
+        "prompt": "너는 Developer Experience 담당 Dana다. 실행 방법, 개발자 경험, 오류 메시지, 로컬 환경 전제를 쉽게 만든다.",
+    },
+    "testkim": {
+        "name": "Test Kim",
+        "role": "QA Engineer",
+        "prompt": "너는 QA Engineer Test Kim이다. 자동화 가능한 테스트와 사람이 봐야 할 검수 항목을 구체적으로 나눈다.",
+    },
+    "jason": {
+        "name": "Jason",
+        "role": "Red Team",
+        "prompt": "너는 Red Team Reviewer Jason이다. 칭찬하지 말고 실패 가능성, 허점, 모호한 요구사항만 지적한다.",
+    },
+    "sana": {
+        "name": "Sana",
+        "role": "Security",
+        "prompt": "너는 Security & Privacy 담당 Sana다. API 키, .env, 개인정보, 위험 명령, 공개 저장소 노출 위험을 점검한다.",
+    },
+    "iris": {
+        "name": "Iris",
+        "role": "Prompt Editor",
+        "prompt": "너는 Prompt Editor Iris다. 프롬프트 문장을 명확하고 덜 모호하게 다듬고, Codex가 오해할 표현을 줄인다.",
+    },
+    "vera": {
+        "name": "Vera",
+        "role": "Validation Judge",
+        "prompt": "너는 Validation Judge Vera다. 품질 점수, blocking issue, warning, 통과 기준을 수치와 근거로 말한다.",
+    },
+    "changwoo": {
+        "name": "창우",
+        "role": "Boss",
+        "prompt": "너는 창우 사장이다. 학습자 관점에서 무엇을 봐야 하는지, 다음 의사결정이 무엇인지 짧고 현실적으로 말한다.",
+    },
+}
+
+
+def run_agent_chat(agent_key: str, question: str) -> dict:
+    agent = AGENT_ROLES.get(agent_key)
+    if not agent:
+        raise RuntimeError("알 수 없는 직원입니다.")
+
+    provider = get_provider()
+    client = require_openai_client() if provider == "openai" else None
+    model = get_agent_model(agent_key)
+    role_prompt = (
+        f"{agent['prompt']} 너의 이름은 {agent['name']}이고 역할은 {agent['role']}다. "
+        "창우에게 한국어로 답한다. 답변은 6문장 이내로 짧고 구체적으로 한다. "
+        "필요하면 체크리스트를 3개 이하로만 제시한다."
+    )
+    answer = ask_agent(client, agent["name"], role_prompt, question, model)
+    return {
+        "ok": True,
+        "agent": agent_key,
+        "name": agent["name"],
+        "role": agent["role"],
+        "provider": provider,
+        "model": model,
+        "answer": answer,
+    }
+
+
 def slugify(text: str) -> str:
     slug = re.sub(r"[^0-9A-Za-z가-힣]+", "-", text).strip("-")
     return slug[:40] or "request"
@@ -490,13 +579,23 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path != "/api/run":
+        if path not in ("/api/run", "/api/agent-chat"):
             self.send_json(404, {"ok": False, "error": "Not found"})
             return
 
         try:
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            if path == "/api/agent-chat":
+                agent = str(payload.get("agent", "")).strip().lower()
+                question = str(payload.get("question", "")).strip()
+                if not question:
+                    self.send_json(400, {"ok": False, "error": "질문을 입력해주세요."})
+                    return
+                result = run_agent_chat(agent, question)
+                self.send_json(200, result)
+                return
+
             request = str(payload.get("request", "")).strip()
             if not request:
                 self.send_json(400, {"ok": False, "error": "요청 내용을 입력해주세요."})

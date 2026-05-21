@@ -67,6 +67,8 @@ textarea {
 
 .side-panel {
   padding: 16px;
+  max-height: calc(100vh - 36px);
+  overflow: auto;
 }
 
 .brand-block {
@@ -139,15 +141,13 @@ button:disabled {
   opacity: 0.6;
 }
 
-.team-list h2 {
-  margin-bottom: 10px;
-  font-size: 18px;
-}
-
 .team-list {
-  max-height: 430px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  max-height: 240px;
   overflow: auto;
-  padding-right: 4px;
+  padding: 8px;
 }
 
 .team-member {
@@ -155,8 +155,13 @@ button:disabled {
   grid-template-columns: 28px 1fr;
   gap: 10px;
   align-items: center;
-  padding: 9px 8px;
+  min-height: 52px;
+  padding: 6px 8px;
   border: 2px solid transparent;
+  background: #fffdf2;
+  color: var(--ink);
+  text-align: left;
+  box-shadow: none;
 }
 
 .team-member.active {
@@ -233,30 +238,27 @@ button:disabled {
 }
 
 .artifact-panel {
-  position: fixed;
-  right: 18px;
-  bottom: 18px;
-  left: 18px;
-  z-index: 60;
   min-width: 0;
-  max-height: min(72vh, 720px);
+  max-height: none;
   overflow: hidden;
-  transform: translateY(calc(100% - 62px));
-  transition: transform 220ms steps(6);
+  transform: none;
+  transition: none;
 }
 
-.artifact-panel.open {
-  transform: translateY(0);
+.artifact-panel.collapsed .artifact-tabs,
+.artifact-panel.collapsed #artifactOutput {
+  display: none;
 }
 
 .hud {
   display: grid;
-  grid-template-columns: 180px 1fr;
+  grid-template-columns: 160px minmax(0, 1fr) 360px;
   gap: 10px;
   margin-bottom: 12px;
 }
 
-.hud > div {
+.hud > div,
+.team-drawer {
   border: 4px solid var(--panel-line);
   background: #fffdf2;
   padding: 10px 12px;
@@ -278,6 +280,71 @@ button:disabled {
 .hud strong {
   margin-top: 3px;
   font-size: 16px;
+}
+
+.team-drawer {
+  position: relative;
+  padding: 0;
+  z-index: 30;
+}
+
+.team-drawer summary {
+  min-height: 58px;
+  padding: 16px 14px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 900;
+  list-style: none;
+}
+
+.team-drawer summary::-webkit-details-marker {
+  display: none;
+}
+
+.team-drawer summary::after {
+  float: right;
+  color: var(--muted);
+  content: "Open";
+}
+
+.team-drawer[open] summary {
+  border-bottom: 4px solid var(--panel-line);
+}
+
+.team-drawer[open] summary::after {
+  content: "Close";
+}
+
+.team-drawer-body {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: -4px;
+  left: -4px;
+  max-height: calc(100vh - 190px);
+  overflow: auto;
+  border: 4px solid var(--panel-line);
+  background: var(--panel);
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.24);
+}
+
+.agent-chat {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-top: 4px solid var(--panel-line);
+}
+
+.agent-chat textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.agent-answer {
+  min-height: 100px;
+  max-height: 180px;
+  border-top: 4px solid var(--panel-line);
+  font-size: 12px;
 }
 
 .office-map {
@@ -670,6 +737,7 @@ button:disabled {
     left 640ms steps(10),
     top 640ms steps(10);
   z-index: 10;
+  cursor: pointer;
 }
 
 .agent.walking .sprite {
@@ -979,6 +1047,14 @@ pre {
     grid-template-columns: 1fr;
   }
 
+  .hud {
+    grid-template-columns: 160px minmax(0, 1fr);
+  }
+
+  .team-drawer {
+    grid-column: 1 / -1;
+  }
+
   .office-map {
     height: min(70vw, calc(100vh - 210px), 680px);
     min-height: 520px;
@@ -1005,11 +1081,5 @@ pre {
 
   .desk {
     transform: scale(0.82);
-  }
-
-  .artifact-panel {
-    right: 10px;
-    bottom: 10px;
-    left: 10px;
   }
 }
