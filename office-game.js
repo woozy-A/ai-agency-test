@@ -408,7 +408,10 @@ function startBackendHeartbeat(label = "AI pipeline", token = null) {
     "Finalizer가 Codex용 프롬프트로 압축할 준비를 하는 중입니다.",
   ];
 
-  if (token === null || isCurrentRun(token)) setTask("Working", `${label} started · 0s`);
+  if (token === null || isCurrentRun(token)) {
+    setTask("Working", `${label} started · 0s`);
+    addLog(`${label}: 모델 응답 대기 시작`);
+  }
   const timer = window.setInterval(() => {
     if (token !== null && !isCurrentRun(token)) {
       window.clearInterval(timer);
@@ -419,7 +422,7 @@ function startBackendHeartbeat(label = "AI pipeline", token = null) {
     const message = messages[(ticks - 1) % messages.length];
     setTask("Working", `${label} running · ${elapsed}s`);
     addLog(`작업 진행 중 (${elapsed}s): ${message}`);
-  }, 15000);
+  }, 5000);
   return timer;
 }
 
@@ -929,12 +932,21 @@ async function runReworkMode() {
   showPaper("request");
   await say("changwoo", "이 결과물 다시 검사해서 수정 지시서로 만들어줘.", 1400, token);
   if (!isCurrentRun(token)) return;
+  addLog("Jay, Dana, Jason이 재검토 자리로 이동 중입니다.");
   await Promise.all([
     moveAgentPath("jay", [positions.hallway.center, positions.jay.review], "Jay is checking implementation", token),
     moveAgentPath("dana", [positions.hallway.lower, positions.dana.review], "Dana is checking execution", token),
     moveAgentPath("jason", [positions.jason.meeting, positions.jason.review], "Jason is red-teaming result", token),
   ]);
   if (!isCurrentRun(token)) return;
+  addLog("재검토팀이 결과물 분석을 시작했습니다.");
+  await Promise.all([
+    say("jay", "구현 지시가 충분한지 먼저 볼게요.", 900, token),
+    say("dana", "실행 방법과 재현 조건을 확인합니다.", 900, token),
+    say("jason", "실패할 지점만 다시 보겠습니다.", 900, token),
+  ]);
+  if (!isCurrentRun(token)) return;
+  addLog(shouldUseBackend() ? "로컬 서버에 Rework 요청을 보냈습니다." : "공개 링크라 Rework 데모 결과를 생성합니다.");
 
   try {
     const payload = shouldUseBackend()
