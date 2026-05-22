@@ -10,8 +10,10 @@ from server import (
     get_agent_provider,
     get_model_candidates,
     is_important_request,
+    is_lunch_menu_request,
     normalize_artifacts,
     project_file_contract,
+    run_lunch_menu_fast_lane,
     review_focus_for,
     run_role_task,
 )
@@ -163,6 +165,16 @@ class ProjectRoutingTest(unittest.TestCase):
         self.assertIn("100점", review_focus_for("vera"))
         self.assertIn("실행 방법", review_focus_for("dana"))
         self.assertIn("Swift", review_focus_for("jay"))
+
+    def test_lunch_menu_request_uses_fast_lane(self):
+        request = "점심 메뉴 랜덤으로 선택하는 웹앱 만들어줘"
+        self.assertTrue(is_lunch_menu_request(request))
+        artifacts, files, calls, model = run_lunch_menu_fast_lane(request)
+        self.assertEqual(calls, 0)
+        self.assertIn("FastLane", model)
+        self.assertIn("100개 이상", artifacts["final"])
+        self.assertIn("재선택 3번", artifacts["final"])
+        self.assertTrue(any(item["path"] == "generated_prompt/codex_prompt.md" for item in files))
 
 
 if __name__ == "__main__":

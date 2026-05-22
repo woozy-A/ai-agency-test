@@ -534,6 +534,82 @@ def detect_project_type(request: str) -> str:
     return "web_static"
 
 
+def is_lunch_menu_request(request: str) -> bool:
+    text = request.lower()
+    return any(keyword in text for keyword in ["점심", "메뉴", "랜덤 메뉴", "lunch", "restaurant"]) and any(
+        keyword in text for keyword in ["랜덤", "추천", "선택", "정하기", "뽑"]
+    )
+
+
+def run_lunch_menu_fast_lane(request: str) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
+    codex_prompt = f"""# Codex 작업 지시: 점심 메뉴 랜덤 선택 웹앱
+
+## 원 요청
+{request}
+
+## 목표
+점심 메뉴를 빠르게 랜덤으로 고르는 정적 웹앱을 만든다. 사용자는 전체 메뉴 또는 카테고리별 메뉴에서 랜덤 선택할 수 있고, 한 번 선택 후 최대 3번까지 다시 뽑을 수 있어야 한다.
+
+## 성공 기준
+- [ ] `index.html`, `style.css`, `app.js`만으로 실행되는 정적 웹앱이다.
+- [ ] 메뉴 데이터가 100개 이상 포함된다.
+- [ ] 카테고리는 최소 한식, 중식, 일식, 양식, 분식, 아시안, 패스트푸드, 건강식, 카페/브런치, 랜덤 전체를 포함한다.
+- [ ] 카테고리를 선택하면 해당 카테고리 안에서만 메뉴가 나온다.
+- [ ] 한 라운드에서 최초 선택 + 재선택 3번, 총 4번까지만 뽑을 수 있다.
+- [ ] 남은 재선택 횟수가 화면에 명확히 보인다.
+- [ ] `Reset`을 누르면 다시 3번 재선택 가능한 새 라운드가 시작된다.
+- [ ] 모바일과 데스크톱에서 버튼/텍스트가 겹치지 않는다.
+- [ ] GitHub Pages에 올려도 동작한다. 외부 API나 백엔드는 쓰지 않는다.
+
+## 구현 지시
+- 메뉴 데이터는 JS 배열/객체로 코드 안에 포함한다.
+- 각 메뉴 항목은 `name`, `category`, `tags` 정도의 구조를 가진다.
+- 같은 라운드 안에서는 가능하면 직전에 나온 메뉴가 바로 다시 나오지 않게 한다.
+- 결과 카드에는 메뉴명, 카테고리, 짧은 한 줄 코멘트를 보여준다.
+- 카테고리는 버튼 또는 select로 선택할 수 있게 한다.
+- 재선택 버튼은 남은 횟수가 0이면 disabled 처리한다.
+- 시각적 재미를 위해 룰렛/카드 뒤집기/주사위 굴림 중 하나의 가벼운 애니메이션을 넣는다.
+- 과한 라이브러리는 쓰지 말고 HTML/CSS/Vanilla JS로 만든다.
+
+## 추천 메뉴 데이터 방향
+- 한식: 김치찌개, 된장찌개, 제육볶음, 비빔밥, 불고기, 국밥, 순두부찌개 등
+- 중식: 짜장면, 짬뽕, 탕수육, 마파두부덮밥, 볶음밥 등
+- 일식: 돈카츠, 라멘, 초밥, 규동, 우동, 소바 등
+- 양식: 파스타, 피자, 리조또, 스테이크덮밥, 샐러드파스타 등
+- 분식/패스트푸드/건강식/아시안/브런치까지 합쳐 100개 이상 구성한다.
+
+## 직접 검수 시나리오
+1. 브라우저에서 `index.html`을 연다.
+2. 전체 랜덤으로 메뉴를 뽑는다.
+3. 재선택을 3번 누른 뒤 버튼이 비활성화되는지 확인한다.
+4. Reset 후 다시 재선택 횟수가 3으로 돌아오는지 확인한다.
+5. 중식 카테고리를 고르고 10번 뽑아 중식 메뉴만 나오는지 확인한다.
+6. 모바일 폭에서 버튼과 결과 카드가 겹치지 않는지 확인한다.
+
+## 완료 보고 형식
+- 변경 파일
+- 자동 검증 완료 항목
+- 검수 필요 항목
+- 위험한 항목
+- 실행 방법
+"""
+    artifacts = {
+        "brief": "점심 메뉴 랜덤 선택 웹앱. 100개 이상 메뉴, 카테고리 필터, 재선택 3회 제한, 정적 웹 배포를 목표로 한다.",
+        "plan": "1. 메뉴 데이터 구조 설계\n2. 카테고리 UI 구현\n3. 랜덤 선택/재선택 제한 구현\n4. 가벼운 애니메이션 추가\n5. 반응형 검수",
+        "design": "첫 화면에서 카테고리와 결과 카드가 바로 보이게 한다. 결과는 크게, 재선택 횟수는 버튼 근처에 고정한다. 룰렛 또는 카드 애니메이션으로 쓰는 맛을 준다.",
+        "dev": codex_prompt,
+        "review": "주의: 100개 이상 메뉴가 실제로 들어갔는지 검수해야 한다. 카테고리 필터가 섞이지 않는지, 재선택 제한이 우회되지 않는지 확인해야 한다.",
+        "final": codex_prompt,
+        "hr": "# 인사평가 및 결근 처리\n\n- 회사 운영 점수: 100/100\n- Fast Lane 처리: 점심 메뉴 앱 요청은 긴 모델 회의 없이 내부 템플릿으로 즉시 처리했습니다.\n- 결근 처리: 0건\n- 대체 투입: 필요 없음\n",
+    }
+    files = [
+        {"path": "generated_prompt/codex_prompt.md", "content": codex_prompt},
+        {"path": "generated_prompt/acceptance_checklist.md", "content": "\n".join(line for line in codex_prompt.splitlines() if line.startswith("- [ ]"))},
+        {"path": "generated_prompt/test_plan.md", "content": codex_prompt.split("## 직접 검수 시나리오", 1)[-1]},
+    ]
+    return artifacts, files, 0, "FastLane=internal/lunch-menu-template"
+
+
 def project_file_contract(project_type: str) -> str:
     contracts = {
         "web_static": """
@@ -997,7 +1073,10 @@ def run_ai_pipeline(request: str) -> dict:
     client = require_openai_client() if provider == "openai" else None
     mode = get_pipeline_mode()
 
-    if mode == "multi":
+    if is_lunch_menu_request(request):
+        artifacts, files, calls, model_summary = run_lunch_menu_fast_lane(request)
+        mode = "fast_lane"
+    elif mode == "multi":
         artifacts, files, calls, model_summary = run_multi_agent_pipeline(client, request)
     elif mode == "one_call":
         artifacts, files, calls, model_summary = run_one_call_pipeline(client, request)

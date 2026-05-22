@@ -369,6 +369,7 @@ function addLog(text) {
 }
 
 async function runBackendPipeline(request, attempt = 0) {
+  setTask("Contacting", "Sending request to local agency server");
   const response = await fetch("/api/run", {
     method: "POST",
     headers: {
@@ -658,6 +659,9 @@ async function runOffice() {
       backendResult = await runBackendPipeline(request);
       pendingArtifacts = backendResult.artifacts;
       addLog(`AI pipeline completed with ${backendResult.provider}/${backendResult.mode || "one_call"}`);
+      if (backendResult.mode === "fast_lane") {
+        addLog("Fast Lane: 단순 앱 요청이라 긴 모델 회의 없이 즉시 프롬프트를 만들었습니다.");
+      }
       if (backendResult.project_type) {
         addLog(`프로젝트 타입: ${backendResult.project_type}`);
       }
