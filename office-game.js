@@ -368,27 +368,51 @@ function addLog(text) {
   if (activeArtifact === "log") renderArtifact();
 }
 
+function startBackendHeartbeat(label = "AI pipeline") {
+  const startedAt = Date.now();
+  let ticks = 0;
+  const messages = [
+    "PM이 요구사항을 정리하는 중입니다.",
+    "구현 담당자가 파일 구조와 테스트 기준을 잡는 중입니다.",
+    "QA가 위험 항목과 검수 시나리오를 확인하는 중입니다.",
+    "Finalizer가 Codex용 프롬프트로 압축할 준비를 하는 중입니다.",
+  ];
+
+  setTask("Working", `${label} started · 0s`);
+  return window.setInterval(() => {
+    ticks += 1;
+    const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+    const message = messages[(ticks - 1) % messages.length];
+    setTask("Working", `${label} running · ${elapsed}s`);
+    addLog(`작업 진행 중 (${elapsed}s): ${message}`);
+  }, 15000);
+}
+
 async function runBackendPipeline(request, attempt = 0) {
-  setTask("Contacting", "Sending request to local agency server");
-  const response = await fetch("/api/run", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ request }),
-  });
-  const payload = await response.json();
-  if (!response.ok && payload.retryable && attempt < 2) {
-    const retryAfter = Math.min(Number(payload.retry_after || 60), 300);
-    addLog(`일시 오류. ${retryAfter}초 후 자동 재시도합니다. (${attempt + 1}/2)`);
-    setTask("Retrying", `Waiting ${retryAfter}s before retry`);
-    await sleep(retryAfter * 1000);
-    return runBackendPipeline(request, attempt + 1);
+  const heartbeat = startBackendHeartbeat(attempt ? `Retry ${attempt + 1}` : "AI pipeline");
+  try {
+    const response = await fetch("/api/run", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ request }),
+    });
+    const payload = await response.json();
+    if (!response.ok && payload.retryable && attempt < 2) {
+      const retryAfter = Math.min(Number(payload.retry_after || 60), 300);
+      addLog(`일시 오류. ${retryAfter}초 후 자동 재시도합니다. (${attempt + 1}/2)`);
+      setTask("Retrying", `Waiting ${retryAfter}s before retry`);
+      await sleep(retryAfter * 1000);
+      return runBackendPipeline(request, attempt + 1);
+    }
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || "AI pipeline request failed");
+    }
+    return payload;
+  } finally {
+    window.clearInterval(heartbeat);
   }
-  if (!response.ok || !payload.ok) {
-    throw new Error(payload.error || "AI pipeline request failed");
-  }
-  return payload;
 }
 
 function createSimulationArtifacts(request) {
