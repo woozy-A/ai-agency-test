@@ -65,7 +65,7 @@ def get_model(provider: str | None = None) -> str:
     if provider == "gemini":
         return os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
     if provider == "ollama":
-        return os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b")
+        return os.getenv("OLLAMA_MODEL", "qwen3:14b")
     raise RuntimeError(f"지원하지 않는 AI_PROVIDER입니다: {provider}")
 
 
@@ -77,7 +77,7 @@ def get_model_candidates(primary_model: str, provider: str | None = None) -> lis
     elif provider == "openai":
         fallback_raw = os.getenv("OPENAI_FALLBACK_MODELS", "")
     elif provider == "ollama":
-        fallback_raw = os.getenv("OLLAMA_FALLBACK_MODELS", "qwen2.5-coder:14b,llama3.2:latest")
+        fallback_raw = os.getenv("OLLAMA_FALLBACK_MODELS", "qwen3:14b,freehuntx/qwen3-coder:14b,llama3.1:latest,gemma4:latest")
     else:
         fallback_raw = ""
 

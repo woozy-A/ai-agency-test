@@ -81,7 +81,8 @@ class ProjectRoutingTest(unittest.TestCase):
     def test_ollama_model_candidates_include_local_fallbacks(self):
         candidates = get_model_candidates("qwen3:14b", "ollama")
         self.assertEqual(candidates[0], "qwen3:14b")
-        self.assertIn("qwen2.5-coder:14b", candidates)
+        self.assertIn("freehuntx/qwen3-coder:14b", candidates)
+        self.assertIn("llama3.1:latest", candidates)
 
     def test_agent_provider_defaults_to_global_provider(self):
         self.assertIn(get_agent_provider("unknown"), ("gemini", "openai", "ollama"))
