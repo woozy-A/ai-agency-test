@@ -132,12 +132,25 @@ let pendingArtifacts = {};
 let logs = [];
 let activeArtifact = "log";
 let running = false;
+let runToken = 0;
+let activeRequestController = null;
 let selectedAgent = "dana";
 let chatHistory = loadChatHistory();
 let agentConfig = defaultAgentConfig;
 
 function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isCurrentRun(token) {
+  return token === runToken;
+}
+
+function abortActiveRequest() {
+  if (activeRequestController) {
+    activeRequestController.abort();
+    activeRequestController = null;
+  }
 }
 
 function loadChatHistory() {
@@ -390,8 +403,10 @@ function startBackendHeartbeat(label = "AI pipeline") {
   }, 15000);
 }
 
-async function runBackendPipeline(request, attempt = 0) {
+async function runBackendPipeline(request, token, attempt = 0) {
   const heartbeat = startBackendHeartbeat(attempt ? `Retry ${attempt + 1}` : "AI pipeline");
+  const controller = new AbortController();
+  activeRequestController = controller;
   try {
     const response = await fetch("/api/run", {
       method: "POST",
@@ -399,14 +414,17 @@ async function runBackendPipeline(request, attempt = 0) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ request }),
+      signal: controller.signal,
     });
     const payload = await response.json();
+    if (!isCurrentRun(token)) throw new Error("작업이 취소되었습니다.");
     if (!response.ok && payload.retryable && attempt < 2) {
       const retryAfter = Math.min(Number(payload.retry_after || 60), 300);
       addLog(`일시 오류. ${retryAfter}초 후 자동 재시도합니다. (${attempt + 1}/2)`);
       setTask("Retrying", `Waiting ${retryAfter}s before retry`);
       await sleep(retryAfter * 1000);
-      return runBackendPipeline(request, attempt + 1);
+      if (!isCurrentRun(token)) throw new Error("작업이 취소되었습니다.");
+      return runBackendPipeline(request, token, attempt + 1);
     }
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error || "AI pipeline request failed");
@@ -414,6 +432,7 @@ async function runBackendPipeline(request, attempt = 0) {
     return payload;
   } finally {
     window.clearInterval(heartbeat);
+    if (activeRequestController === controller) activeRequestController = null;
   }
 }
 
@@ -616,8 +635,10 @@ async function reviewArtifact(agentKey, instruction) {
   return payload;
 }
 
-async function runReworkRequest(originalRequest, result, extraContext) {
+async function runReworkRequest(originalRequest, result, extraContext, token) {
   const heartbeat = startBackendHeartbeat("Rework mode");
+  const controller = new AbortController();
+  activeRequestController = controller;
   try {
     const response = await fetch("/api/rework", {
       method: "POST",
@@ -629,14 +650,17 @@ async function runReworkRequest(originalRequest, result, extraContext) {
         result,
         extra_context: extraContext,
       }),
+      signal: controller.signal,
     });
     const payload = await response.json();
+    if (!isCurrentRun(token)) throw new Error("작업이 취소되었습니다.");
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error || "Rework request failed");
     }
     return payload;
   } finally {
     window.clearInterval(heartbeat);
+    if (activeRequestController === controller) activeRequestController = null;
   }
 }
 
@@ -645,6 +669,8 @@ function showPaper(key) {
 }
 
 function resetOffice() {
+  abortActiveRequest();
+  runToken += 1;
   running = false;
   artifacts = {};
   pendingArtifacts = {};
@@ -687,6 +713,8 @@ async function sendEveryoneHome() {
 async function runOffice() {
   if (running) return;
   running = true;
+  runToken += 1;
+  const token = runToken;
   els.startButton.disabled = true;
   logs = [];
   artifacts = { log: "" };
@@ -707,7 +735,8 @@ async function runOffice() {
   setTask("Running", "Prompt team is shaping the request");
   if (shouldUseBackend()) {
     try {
-      backendResult = await runBackendPipeline(request);
+      backendResult = await runBackendPipeline(request, token);
+      if (!isCurrentRun(token)) return;
       pendingArtifacts = backendResult.artifacts;
       addLog(`AI pipeline completed with ${backendResult.provider}/${backendResult.mode || "one_call"}`);
       if (backendResult.mode === "fast_lane") {
@@ -729,6 +758,11 @@ async function runOffice() {
         addLog(`생성 프롬프트: ${backendResult.files.join(", ")}`);
       }
     } catch (error) {
+      if (error.name === "AbortError" || !isCurrentRun(token)) {
+        addLog("작업이 취소되었습니다.");
+        setTask("Canceled", "Request canceled");
+        return;
+      }
       artifacts.log = logs.concat([`ERROR. ${error.message}`]).join("\n");
       activeArtifact = "log";
       renderArtifact();
@@ -736,6 +770,7 @@ async function runOffice() {
       await say("mike", "백엔드 설정을 먼저 확인해야 해요.", 1400);
       running = false;
       els.startButton.disabled = false;
+      els.reworkButton.disabled = false;
       return;
     }
   } else {
@@ -743,6 +778,7 @@ async function runOffice() {
     backendResult = { quality_score: { score: pendingArtifacts.qualityScore } };
     addLog("공개 링크에서는 시뮬레이션 모드로 실행됩니다.");
   }
+  if (!isCurrentRun(token)) return;
   updateScoreFromResult(backendResult, pendingArtifacts);
   artifacts.brief = pendingArtifacts.brief;
   addLog("Mike가 과제를 brief로 정리했습니다.");
@@ -829,6 +865,7 @@ async function runOffice() {
   setActiveAgent(null);
   running = false;
   els.startButton.disabled = false;
+  els.reworkButton.disabled = false;
 }
 
 async function runReworkMode() {
@@ -841,6 +878,8 @@ async function runReworkMode() {
   }
 
   running = true;
+  runToken += 1;
+  const token = runToken;
   els.startButton.disabled = true;
   els.reworkButton.disabled = true;
   logs = [];
@@ -863,7 +902,7 @@ async function runReworkMode() {
 
   try {
     const payload = shouldUseBackend()
-      ? await runReworkRequest(originalRequest, result, "브라우저 Rework Mode에서 제출됨")
+      ? await runReworkRequest(originalRequest, result, "브라우저 Rework Mode에서 제출됨", token)
       : {
           mode: "rework-demo",
           model: "simulation/rework",
@@ -880,6 +919,7 @@ async function runReworkMode() {
             hr: "# Rework Demo\n\n- 공개 링크 데모 모드",
           },
         };
+    if (!isCurrentRun(token)) return;
     pendingArtifacts = payload.artifacts;
     artifacts.brief = pendingArtifacts.brief;
     artifacts.plan = pendingArtifacts.plan;
@@ -901,15 +941,22 @@ async function runReworkMode() {
     toggleArtifactPanel(true);
     setTask("Done", "Rework prompt is ready");
   } catch (error) {
+    if (error.name === "AbortError" || !isCurrentRun(token)) {
+      addLog("재작업이 취소되었습니다.");
+      setTask("Canceled", "Rework canceled");
+      return;
+    }
     artifacts.log = logs.concat([`ERROR. ${error.message}`]).join("\n");
     activeArtifact = "log";
     renderArtifact();
     setTask("Error", "Rework needs attention");
     await say("dana", "재작업 입력이나 서버 상태를 확인해야 해요.", 1400);
   } finally {
-    running = false;
-    els.startButton.disabled = false;
-    els.reworkButton.disabled = false;
+    if (isCurrentRun(token)) {
+      running = false;
+      els.startButton.disabled = false;
+      els.reworkButton.disabled = false;
+    }
   }
 }
 
