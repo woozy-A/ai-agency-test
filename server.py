@@ -16,6 +16,16 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 OUTPUTS = ROOT / "outputs"
+FORBIDDEN_STATIC_NAMES = {
+    ".env",
+    ".env.example",
+    ".gitignore",
+}
+FORBIDDEN_STATIC_SUFFIXES = {
+    ".key",
+    ".pem",
+    ".p12",
+}
 
 
 class RetryableAIError(RuntimeError):
@@ -326,10 +336,12 @@ def ask_final_editor(client, role_prompt: str, user_prompt: str, important: bool
     fallback_provider = os.getenv("FINAL_LOCAL_PROVIDER", "ollama")
     fallback_model = os.getenv("FINAL_LOCAL_MODEL", "qwen3:14b")
     normal_models = [os.getenv("FINAL_MODEL", "gemini-2.0-flash")]
-    important_models = [
-        os.getenv("FINAL_DIRECTOR_MODEL", "gemini-3.5-flash"),
-        os.getenv("FINAL_MODEL", "gemini-2.0-flash"),
-    ]
+    director_fallbacks = os.getenv(
+        "FINAL_DIRECTOR_FALLBACK_MODELS",
+        "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash",
+    )
+    important_models = [os.getenv("FINAL_DIRECTOR_MODEL", "gemini-2.5-pro")]
+    important_models.extend(item.strip() for item in director_fallbacks.split(",") if item.strip())
     chain = [("gemini", model) for model in (important_models if important else normal_models)]
     chain.append((fallback_provider, fallback_model))
 
@@ -911,7 +923,7 @@ def run_rework_pipeline(original_request: str, result: str, extra_context: str =
         "provider": get_provider(),
         "model": "Rework=Jay+Dana+Yuna+Jason+Sana+Vera",
         "calls": calls,
-        "output_dir": str(output_dir),
+        "output_dir": str(output_dir.relative_to(ROOT)),
         "files": [item["path"] for item in files],
         "artifacts": artifacts,
     }
@@ -1154,8 +1166,15 @@ def get_agent_config() -> dict:
                 f"ollama/{os.getenv('FINAL_LOCAL_MODEL', 'qwen3:14b')}",
             ],
             "important": [
-                f"gemini/{os.getenv('FINAL_DIRECTOR_MODEL', 'gemini-3.5-flash')}",
-                f"gemini/{os.getenv('FINAL_MODEL', 'gemini-2.0-flash')}",
+                f"gemini/{os.getenv('FINAL_DIRECTOR_MODEL', 'gemini-2.5-pro')}",
+                *[
+                    f"gemini/{item.strip()}"
+                    for item in os.getenv(
+                        "FINAL_DIRECTOR_FALLBACK_MODELS",
+                        "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash",
+                    ).split(",")
+                    if item.strip()
+                ],
                 f"ollama/{os.getenv('FINAL_LOCAL_MODEL', 'qwen3:14b')}",
             ],
         },
@@ -1188,7 +1207,7 @@ def run_ai_pipeline(request: str) -> dict:
         "model_candidates": get_model_candidates(get_model(provider), provider),
         "mode": mode,
         "calls": calls,
-        "output_dir": str(output_dir),
+        "output_dir": str(output_dir.relative_to(ROOT)),
         "files": [item["path"] for item in files],
         "quality_score": extract_quality_score(files, artifacts),
         "artifacts": artifacts,
@@ -1198,6 +1217,25 @@ def run_ai_pipeline(request: str) -> dict:
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
+
+    def is_forbidden_static_path(self, path: str) -> bool:
+        requested = urlparse(path).path
+        parts = [part for part in requested.split("/") if part]
+        if not parts:
+            return False
+        if any(part.startswith(".") for part in parts):
+            return True
+        if parts[0] == "outputs":
+            return True
+        leaf = parts[-1]
+        lowered = leaf.lower()
+        if leaf in FORBIDDEN_STATIC_NAMES:
+            return True
+        if any(lowered.endswith(suffix) for suffix in FORBIDDEN_STATIC_SUFFIXES):
+            return True
+        if any(marker in lowered for marker in ("secret", "apikey", "api_key", "token", "credential")):
+            return True
+        return False
 
     def send_json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -1216,7 +1254,16 @@ class Handler(SimpleHTTPRequestHandler):
                 traceback.print_exc()
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
+        if self.is_forbidden_static_path(self.path):
+            self.send_error(403, "Forbidden")
+            return
         super().do_GET()
+
+    def do_HEAD(self) -> None:
+        if self.is_forbidden_static_path(self.path):
+            self.send_error(403, "Forbidden")
+            return
+        super().do_HEAD()
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path

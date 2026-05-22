@@ -53,7 +53,7 @@ const defaultAgentConfig = {
   mode: "demo",
   finalizer: {
     normal: ["gemini/gemini-2.0-flash", "ollama/qwen3:14b"],
-    important: ["gemini/gemini-3.5-flash", "gemini/gemini-2.0-flash", "ollama/qwen3:14b"],
+    important: ["gemini/gemini-2.5-pro", "gemini/gemini-2.5-flash", "gemini/gemini-2.5-flash-lite", "gemini/gemini-2.0-flash", "ollama/qwen3:14b"],
   },
   agents: {
     mike: { provider: "ollama", model: "qwen3:14b", kind: "Local" },
@@ -199,7 +199,7 @@ function renderModelConfig() {
 
   if (!els.modelRouting) return;
   const normal = agentConfig.finalizer?.normal?.join(" -> ") || "gemini/gemini-2.0-flash -> ollama/qwen3:14b";
-  const important = agentConfig.finalizer?.important?.join(" -> ") || "gemini/gemini-3.5-flash -> gemini/gemini-2.0-flash -> ollama/qwen3:14b";
+  const important = agentConfig.finalizer?.important?.join(" -> ") || "gemini/gemini-2.5-pro -> gemini/gemini-2.5-flash -> gemini/gemini-2.5-flash-lite -> gemini/gemini-2.0-flash -> ollama/qwen3:14b";
   els.modelRouting.innerHTML = `
     <strong>Model Routing</strong>
     <p>Pipeline: ${agentConfig.mode || "multi"}</p>
@@ -261,7 +261,7 @@ function clearChatHistory() {
   chatHistory = [];
   window.localStorage.removeItem(CHAT_HISTORY_KEY);
   renderChatHistory();
-  els.agentChatStatus.textContent = "질문 기록을 비웠습니다.";
+  setSideStatus("질문 기록을 비웠습니다.");
 }
 
 function renderChatHistory() {
@@ -328,7 +328,7 @@ function selectAgent(agentKey, announce = true) {
   selectedAgent = agentKey;
   setActiveAgent(agentKey);
   els.selectedAgentLabel.textContent = agentLabels[agentKey];
-  els.agentChatStatus.textContent = `${agentLabels[agentKey]} ${agentRoles[agentKey]} 선택됨 · ${formatRoute(agentKey)}`;
+  setSideStatus(`${agentLabels[agentKey]} ${agentRoles[agentKey]} 선택됨 · ${formatRoute(agentKey)}`);
   if (announce) {
     showSpeech(agentKey, "저에게 물어보세요.");
     window.setTimeout(() => hideSpeech(agentKey), 1440);
@@ -340,13 +340,19 @@ function setTask(status, task) {
   els.taskText.textContent = task;
 }
 
-function showSpeech(agentKey, text) {
+function setSideStatus(text) {
+  els.agentChatStatus.textContent = text;
+}
+
+function showSpeech(agentKey, text, token = null) {
+  if (token !== null && !isCurrentRun(token)) return;
   const speech = els.agents[agentKey].querySelector(".speech");
   speech.textContent = text;
   speech.classList.add("show");
 }
 
-function hideSpeech(agentKey) {
+function hideSpeech(agentKey, token = null) {
+  if (token !== null && !isCurrentRun(token)) return;
   els.agents[agentKey].querySelector(".speech").classList.remove("show");
 }
 
@@ -354,26 +360,35 @@ function hideAllSpeech() {
   Object.keys(els.agents).forEach(hideSpeech);
 }
 
-async function moveAgent(agentKey, point, taskText) {
+async function moveAgent(agentKey, point, taskText, token = null) {
+  if (token !== null && !isCurrentRun(token)) return false;
   const agent = els.agents[agentKey];
   setActiveAgent(agentKey);
   if (taskText) setTask("Running", taskText);
   agent.classList.add("walking");
   setAgentPosition(agentKey, point);
   await sleep(680);
+  if (token !== null && !isCurrentRun(token)) return false;
   agent.classList.remove("walking");
+  return true;
 }
 
-async function moveAgentPath(agentKey, points, taskText) {
+async function moveAgentPath(agentKey, points, taskText, token = null) {
   for (const [index, point] of points.entries()) {
-    await moveAgent(agentKey, point, index === 0 ? taskText : "");
+    if (token !== null && !isCurrentRun(token)) return false;
+    const moved = await moveAgent(agentKey, point, index === 0 ? taskText : "", token);
+    if (!moved) return false;
   }
+  return true;
 }
 
-async function say(agentKey, text, ms = 1000) {
-  showSpeech(agentKey, text);
+async function say(agentKey, text, ms = 1000, token = null) {
+  if (token !== null && !isCurrentRun(token)) return false;
+  showSpeech(agentKey, text, token);
   await sleep(ms * 1.2);
-  hideSpeech(agentKey);
+  if (token !== null && !isCurrentRun(token)) return false;
+  hideSpeech(agentKey, token);
+  return true;
 }
 
 function addLog(text) {
@@ -383,7 +398,7 @@ function addLog(text) {
   if (activeArtifact === "log") renderArtifact();
 }
 
-function startBackendHeartbeat(label = "AI pipeline") {
+function startBackendHeartbeat(label = "AI pipeline", token = null) {
   const startedAt = Date.now();
   let ticks = 0;
   const messages = [
@@ -393,18 +408,23 @@ function startBackendHeartbeat(label = "AI pipeline") {
     "Finalizer가 Codex용 프롬프트로 압축할 준비를 하는 중입니다.",
   ];
 
-  setTask("Working", `${label} started · 0s`);
-  return window.setInterval(() => {
+  if (token === null || isCurrentRun(token)) setTask("Working", `${label} started · 0s`);
+  const timer = window.setInterval(() => {
+    if (token !== null && !isCurrentRun(token)) {
+      window.clearInterval(timer);
+      return;
+    }
     ticks += 1;
     const elapsed = Math.floor((Date.now() - startedAt) / 1000);
     const message = messages[(ticks - 1) % messages.length];
     setTask("Working", `${label} running · ${elapsed}s`);
     addLog(`작업 진행 중 (${elapsed}s): ${message}`);
   }, 15000);
+  return timer;
 }
 
 async function runBackendPipeline(request, token, attempt = 0) {
-  const heartbeat = startBackendHeartbeat(attempt ? `Retry ${attempt + 1}` : "AI pipeline");
+  const heartbeat = startBackendHeartbeat(attempt ? `Retry ${attempt + 1}` : "AI pipeline", token);
   const controller = new AbortController();
   activeRequestController = controller;
   try {
@@ -526,11 +546,11 @@ function shouldUseBackend() {
 }
 
 function updateArtifactCount() {
-  const created = ["log", "brief", "plan", "design", "dev", "final", "hr"].filter((key) => {
+  const created = ["log", "brief", "plan", "design", "dev", "review", "final", "hr"].filter((key) => {
     if (key === "log") return logs.length > 0;
     return Boolean(artifacts[key]);
   }).length;
-  els.artifactCount.textContent = `${created}/7`;
+  els.artifactCount.textContent = `${created}/8`;
 }
 
 function renderArtifact() {
@@ -636,7 +656,7 @@ async function reviewArtifact(agentKey, instruction) {
 }
 
 async function runReworkRequest(originalRequest, result, extraContext, token) {
-  const heartbeat = startBackendHeartbeat("Rework mode");
+  const heartbeat = startBackendHeartbeat("Rework mode", token);
   const controller = new AbortController();
   activeRequestController = controller;
   try {
@@ -694,20 +714,24 @@ function resetOffice() {
   els.reworkButton.disabled = false;
 }
 
-async function sendEveryoneHome() {
+async function sendEveryoneHome(token = null) {
+  if (token !== null && !isCurrentRun(token)) return false;
   setTask("Wrapping up", "Team is returning to desks");
-  await say("mike", "오늘 회의는 여기까지. 모두 고생했어요.", 1500);
+  await say("mike", "오늘 회의는 여기까지. 모두 고생했어요.", 1500, token);
+  if (token !== null && !isCurrentRun(token)) return false;
   await Promise.all(
     Object.keys(els.agents).map((agentKey) => {
       const home = positions[agentKey]?.home;
       if (!home) return Promise.resolve();
-      return moveAgentPath(agentKey, [positions.hallway.delivery, home], `${agentLabels[agentKey]} is returning to desk`);
+      return moveAgentPath(agentKey, [positions.hallway.delivery, home], `${agentLabels[agentKey]} is returning to desk`, token);
     })
   );
+  if (token !== null && !isCurrentRun(token)) return false;
   await Promise.all([
-    say("dana", "기록은 남겨둘게요.", 900),
-    say("yuna", "검수 항목도 정리됐습니다.", 900),
+    say("dana", "기록은 남겨둘게요.", 900, token),
+    say("yuna", "검수 항목도 정리됐습니다.", 900, token),
   ]);
+  return true;
 }
 
 async function runOffice() {
@@ -728,10 +752,12 @@ async function runOffice() {
 
   showPaper("request");
   addLog("창우가 새 과제를 올렸습니다.");
-  await say("changwoo", "Mike, Codex에 넣을 작업지시서로 뽑아줘.", 1400);
+  await say("changwoo", "Mike, Codex에 넣을 작업지시서로 뽑아줘.", 1400, token);
+  if (!isCurrentRun(token)) return;
 
-  await moveAgentPath("mike", [positions.hallway.center, positions.hallway.boss, positions.mike.boss], "Mike is receiving the request");
-  await say("mike", "접수했습니다. 프롬프트 기준부터 잡을게요.", 1200);
+  await moveAgentPath("mike", [positions.hallway.center, positions.hallway.boss, positions.mike.boss], "Mike is receiving the request", token);
+  await say("mike", "접수했습니다. 프롬프트 기준부터 잡을게요.", 1200, token);
+  if (!isCurrentRun(token)) return;
   setTask("Running", "Prompt team is shaping the request");
   if (shouldUseBackend()) {
     try {
@@ -767,7 +793,7 @@ async function runOffice() {
       activeArtifact = "log";
       renderArtifact();
       setTask("Error", "Backend setup needs attention");
-      await say("mike", "백엔드 설정을 먼저 확인해야 해요.", 1400);
+      await say("mike", "백엔드 설정을 먼저 확인해야 해요.", 1400, token);
       running = false;
       els.startButton.disabled = false;
       els.reworkButton.disabled = false;
@@ -783,34 +809,37 @@ async function runOffice() {
   artifacts.brief = pendingArtifacts.brief;
   addLog("Mike가 과제를 brief로 정리했습니다.");
   showPaper("brief");
-  await say("mike", "목표, 범위, 제외 범위 정리 완료.", 1000);
-  await moveAgentPath("mike", [positions.hallway.boss, positions.hallway.center, positions.mike.home], "Mike is planning");
-  await say("mike", "Mina, Jay. Codex 지시서 같이 다듬죠.", 1200);
+  await say("mike", "목표, 범위, 제외 범위 정리 완료.", 1000, token);
+  await moveAgentPath("mike", [positions.hallway.boss, positions.hallway.center, positions.mike.home], "Mike is planning", token);
+  await say("mike", "Mina, Jay. Codex 지시서 같이 다듬죠.", 1200, token);
+  if (!isCurrentRun(token)) return;
   artifacts.plan = pendingArtifacts.plan;
   addLog("Mike가 실행 계획을 만들었습니다.");
 
   await Promise.all([
-    moveAgentPath("mike", [positions.hallway.center, positions.mike.meeting], "Mike is calling a meeting"),
-    moveAgentPath("mina", [positions.mina.mike, positions.mina.meeting], "Mina is joining the meeting"),
-    moveAgentPath("jay", [positions.jay.mike, positions.jay.meeting], "Jay is joining the meeting"),
+    moveAgentPath("mike", [positions.hallway.center, positions.mike.meeting], "Mike is calling a meeting", token),
+    moveAgentPath("mina", [positions.mina.mike, positions.mina.meeting], "Mina is joining the meeting", token),
+    moveAgentPath("jay", [positions.jay.mike, positions.jay.meeting], "Jay is joining the meeting", token),
   ]);
-  await say("mike", "Mina는 UX 기준, Jay는 구현 지시를 맡아줘.", 1400);
-  await Promise.all([say("mina", "검수 가능한 화면 기준으로 쓸게요.", 1100), say("jay", "Codex가 바로 실행할 명령으로 정리합니다.", 1100)]);
+  await say("mike", "Mina는 UX 기준, Jay는 구현 지시를 맡아줘.", 1400, token);
+  await Promise.all([say("mina", "검수 가능한 화면 기준으로 쓸게요.", 1100, token), say("jay", "Codex가 바로 실행할 명령으로 정리합니다.", 1100, token)]);
+  if (!isCurrentRun(token)) return;
   addLog("Mike, Mina, Jay가 짧은 회의를 마쳤습니다.");
 
   await Promise.all([
-    moveAgentPath("mina", [positions.mina.mike, positions.mina.work], "Mina is designing"),
-    moveAgentPath("jay", [positions.hallway.lower, positions.jay.work], "Jay is building"),
-    moveAgentPath("nora", [positions.nora.meeting, positions.nora.home], "Nora is trimming scope"),
-    moveAgentPath("dana", [positions.dana.meeting, positions.dana.home], "Dana is checking execution"),
-    moveAgentPath("mike", [positions.hallway.center, positions.mike.home], "Mike is tracking progress"),
+    moveAgentPath("mina", [positions.mina.mike, positions.mina.work], "Mina is designing", token),
+    moveAgentPath("jay", [positions.hallway.lower, positions.jay.work], "Jay is building", token),
+    moveAgentPath("nora", [positions.nora.meeting, positions.nora.home], "Nora is trimming scope", token),
+    moveAgentPath("dana", [positions.dana.meeting, positions.dana.home], "Dana is checking execution", token),
+    moveAgentPath("mike", [positions.hallway.center, positions.mike.home], "Mike is tracking progress", token),
   ]);
   await Promise.all([
-    say("mina", "핵심 화면과 상태 기준을 정리했어요.", 1200),
-    say("jay", "파일 구조와 테스트 명령을 넣었습니다.", 1200),
-    say("nora", "이번 작업 범위와 제외 범위를 잘랐습니다.", 1200),
-    say("dana", "실행 명령과 환경 전제를 고정했어요.", 1200),
+    say("mina", "핵심 화면과 상태 기준을 정리했어요.", 1200, token),
+    say("jay", "파일 구조와 테스트 명령을 넣었습니다.", 1200, token),
+    say("nora", "이번 작업 범위와 제외 범위를 잘랐습니다.", 1200, token),
+    say("dana", "실행 명령과 환경 전제를 고정했어요.", 1200, token),
   ]);
+  if (!isCurrentRun(token)) return;
   artifacts.design = pendingArtifacts.design;
   addLog("Mina가 design artifact를 만들었습니다.");
   artifacts.dev = pendingArtifacts.dev;
@@ -818,44 +847,49 @@ async function runOffice() {
   showPaper("draft");
 
   await Promise.all([
-    moveAgentPath("mike", [positions.hallway.center, positions.mike.review], "Mike is requesting review"),
-    moveAgentPath("yuna", [positions.yuna.meeting, positions.yuna.work], "Yuna is reviewing"),
-    moveAgentPath("testkim", [positions.testkim.meeting, positions.testkim.review], "Test Kim is writing tests"),
-    moveAgentPath("jason", [positions.jason.meeting, positions.jason.review], "Jason is red-teaming"),
-    moveAgentPath("sana", [positions.sana.meeting, positions.sana.review], "Sana is checking safety"),
-    moveAgentPath("iris", [positions.iris.meeting, positions.iris.review], "Iris is editing prompt"),
-    moveAgentPath("vera", [positions.vera.meeting, positions.vera.review], "Vera is scoring quality"),
+    moveAgentPath("mike", [positions.hallway.center, positions.mike.review], "Mike is requesting review", token),
+    moveAgentPath("yuna", [positions.yuna.meeting, positions.yuna.work], "Yuna is reviewing", token),
+    moveAgentPath("testkim", [positions.testkim.meeting, positions.testkim.review], "Test Kim is writing tests", token),
+    moveAgentPath("jason", [positions.jason.meeting, positions.jason.review], "Jason is red-teaming", token),
+    moveAgentPath("sana", [positions.sana.meeting, positions.sana.review], "Sana is checking safety", token),
+    moveAgentPath("iris", [positions.iris.meeting, positions.iris.review], "Iris is editing prompt", token),
+    moveAgentPath("vera", [positions.vera.meeting, positions.vera.review], "Vera is scoring quality", token),
   ]);
-  await say("mike", "Yuna, 검증 가능한 프롬프트인지 봐주세요.", 1200);
+  await say("mike", "Yuna, 검증 가능한 프롬프트인지 봐주세요.", 1200, token);
   await Promise.all([
-    say("yuna", "체크리스트, 테스트, 위험 항목을 나눠볼게요.", 1300),
-    say("testkim", "자동 테스트와 수동 검수를 분리합니다.", 1300),
-    say("jason", "망할 지점만 보겠습니다.", 1300),
+    say("yuna", "체크리스트, 테스트, 위험 항목을 나눠볼게요.", 1300, token),
+    say("testkim", "자동 테스트와 수동 검수를 분리합니다.", 1300, token),
+    say("jason", "망할 지점만 보겠습니다.", 1300, token),
   ]);
   await Promise.all([
-    say("sana", "비밀값과 위험 명령을 차단합니다.", 1200),
-    say("iris", "Codex가 오해하지 않게 문장을 다듬습니다.", 1200),
-    say("vera", "품질 점수와 blocking issue를 매깁니다.", 1200),
+    say("sana", "비밀값과 위험 명령을 차단합니다.", 1200, token),
+    say("iris", "Codex가 오해하지 않게 문장을 다듬습니다.", 1200, token),
+    say("vera", "품질 점수와 blocking issue를 매깁니다.", 1200, token),
   ]);
+  if (!isCurrentRun(token)) return;
   addLog("Yuna가 프롬프트 패키지를 검토했습니다.");
 
   await Promise.all([
-    moveAgentPath("mike", [positions.hallway.delivery, positions.mike.delivery], "Team is preparing delivery"),
-    moveAgentPath("mina", [positions.hallway.delivery, positions.mina.delivery], "Team is preparing delivery"),
-    moveAgentPath("jay", [positions.hallway.delivery, positions.jay.delivery], "Team is preparing delivery"),
-    moveAgentPath("yuna", [positions.hallway.delivery, positions.yuna.delivery], "Team is preparing delivery"),
-    moveAgentPath("jason", [positions.hallway.delivery, positions.jason.delivery], "Red team signs off"),
-    moveAgentPath("vera", [positions.hallway.delivery, positions.vera.delivery], "Vera sends score"),
-    moveAgentPath("changwoo", [positions.hallway.center, positions.hallway.delivery, positions.changwoo.delivery], "Changwoo is checking final delivery"),
+    moveAgentPath("mike", [positions.hallway.delivery, positions.mike.delivery], "Team is preparing delivery", token),
+    moveAgentPath("mina", [positions.hallway.delivery, positions.mina.delivery], "Team is preparing delivery", token),
+    moveAgentPath("jay", [positions.hallway.delivery, positions.jay.delivery], "Team is preparing delivery", token),
+    moveAgentPath("yuna", [positions.hallway.delivery, positions.yuna.delivery], "Team is preparing delivery", token),
+    moveAgentPath("jason", [positions.hallway.delivery, positions.jason.delivery], "Red team signs off", token),
+    moveAgentPath("vera", [positions.hallway.delivery, positions.vera.delivery], "Vera sends score", token),
+    moveAgentPath("changwoo", [positions.hallway.center, positions.hallway.delivery, positions.changwoo.delivery], "Changwoo is checking final delivery", token),
   ]);
+  if (!isCurrentRun(token)) return;
+  artifacts.review = pendingArtifacts.review;
   artifacts.final = pendingArtifacts.final;
   artifacts.hr = pendingArtifacts.hr;
   showPaper("final");
   els.deliveryBox.classList.add("complete");
-  await say("mike", "Codex용 최종 프롬프트 준비됐습니다.", 1200);
-  await say("changwoo", "좋아. 이걸 Codex에 넣어볼게.", 1100);
+  await say("mike", "Codex용 최종 프롬프트 준비됐습니다.", 1200, token);
+  await say("changwoo", "좋아. 이걸 Codex에 넣어볼게.", 1100, token);
+  if (!isCurrentRun(token)) return;
   addLog("프롬프트 패키지가 납품 박스에 도착했습니다.");
-  await sendEveryoneHome();
+  await sendEveryoneHome(token);
+  if (!isCurrentRun(token)) return;
   addLog("회의 종료 후 팀원이 각자 자리로 돌아갔습니다.");
 
   activeArtifact = "final";
@@ -893,12 +927,14 @@ async function runReworkMode() {
   const originalRequest = els.requestInput.value.trim();
   addLog("창우가 Codex 결과물을 Rework Desk에 제출했습니다.");
   showPaper("request");
-  await say("changwoo", "이 결과물 다시 검사해서 수정 지시서로 만들어줘.", 1400);
+  await say("changwoo", "이 결과물 다시 검사해서 수정 지시서로 만들어줘.", 1400, token);
+  if (!isCurrentRun(token)) return;
   await Promise.all([
-    moveAgentPath("jay", [positions.hallway.center, positions.jay.review], "Jay is checking implementation"),
-    moveAgentPath("dana", [positions.hallway.lower, positions.dana.review], "Dana is checking execution"),
-    moveAgentPath("jason", [positions.jason.meeting, positions.jason.review], "Jason is red-teaming result"),
+    moveAgentPath("jay", [positions.hallway.center, positions.jay.review], "Jay is checking implementation", token),
+    moveAgentPath("dana", [positions.hallway.lower, positions.dana.review], "Dana is checking execution", token),
+    moveAgentPath("jason", [positions.jason.meeting, positions.jason.review], "Jason is red-teaming result", token),
   ]);
+  if (!isCurrentRun(token)) return;
 
   try {
     const payload = shouldUseBackend()
@@ -935,7 +971,8 @@ async function runReworkMode() {
     showPaper("draft");
     showPaper("final");
     els.deliveryBox.classList.add("complete");
-    await Promise.all([say("jay", "수정 지시서 만들었습니다.", 1100), say("jason", "위험 지점도 표시했습니다.", 1100)]);
+    await Promise.all([say("jay", "수정 지시서 만들었습니다.", 1100, token), say("jason", "위험 지점도 표시했습니다.", 1100, token)]);
+    if (!isCurrentRun(token)) return;
     activeArtifact = "final";
     renderArtifact();
     toggleArtifactPanel(true);
@@ -950,7 +987,7 @@ async function runReworkMode() {
     activeArtifact = "log";
     renderArtifact();
     setTask("Error", "Rework needs attention");
-    await say("dana", "재작업 입력이나 서버 상태를 확인해야 해요.", 1400);
+    await say("dana", "재작업 입력이나 서버 상태를 확인해야 해요.", 1400, token);
   } finally {
     if (isCurrentRun(token)) {
       running = false;
@@ -984,25 +1021,23 @@ els.agentChatForm.addEventListener("submit", async (event) => {
   if (!question) return;
   const agentKey = selectedAgent;
   els.askAgentButton.disabled = true;
-  els.agentChatStatus.textContent = `${agentLabels[agentKey]}에게 질문 중...`;
-  setTask("Asking", `${agentLabels[agentKey]} is answering`);
+  setSideStatus(`${agentLabels[agentKey]}에게 질문 중...`);
   showSpeech(agentKey, "잠깐만요. 답변 정리 중입니다.");
   try {
     const payload = await askAgent(agentKey, question);
     const source = payload.provider ? `${payload.provider}/${payload.model}` : "";
     addChatHistory(agentKey, question, payload.answer, source);
-    els.agentChatStatus.textContent = `${agentLabels[agentKey]} 답변 기록됨 · ${source || formatRoute(agentKey)}`;
+    setSideStatus(`${agentLabels[agentKey]} 답변 기록됨 · ${source || formatRoute(agentKey)}`);
     showSpeech(agentKey, "답변했습니다.");
     addLog(`${agentLabels[agentKey]} 질문 기록: ${question}`);
   } catch (error) {
     addChatHistory(agentKey, question, `ERROR. ${error.message}`, "error");
-    els.agentChatStatus.textContent = "질문 처리 오류";
+    setSideStatus("질문 처리 오류");
     showSpeech(agentKey, "오류가 났어요.");
     addLog(`${agentLabels[agentKey]} 질문 오류: ${question}`);
   } finally {
     await sleep(1080);
     hideSpeech(agentKey);
-    setTask(running ? "Running" : "Idle", running ? "Pipeline is running" : "Waiting for request");
     els.askAgentButton.disabled = false;
   }
 });
@@ -1012,8 +1047,7 @@ els.reviewArtifactButton.addEventListener("click", async () => {
   const instruction = els.agentQuestion.value.trim() || `${agentLabels[agentKey]} 역할에 맞게 final 산출물을 다시 검사해줘.`;
   els.reviewArtifactButton.disabled = true;
   els.askAgentButton.disabled = true;
-  els.agentChatStatus.textContent = `${agentLabels[agentKey]}가 산출물 재검토 중...`;
-  setTask("Reviewing", `${agentLabels[agentKey]} is reviewing final artifact`);
+  setSideStatus(`${agentLabels[agentKey]}가 산출물 재검토 중...`);
   showSpeech(agentKey, "산출물 다시 보겠습니다.");
   try {
     const payload = await reviewArtifact(agentKey, instruction);
@@ -1021,17 +1055,16 @@ els.reviewArtifactButton.addEventListener("click", async () => {
     const artifactName = payload.artifact || "final";
     addChatHistory(agentKey, `[${artifactName} 재검토] ${instruction}`, payload.answer, source);
     addLog(`${agentLabels[agentKey]}가 ${artifactName} 산출물을 재검토했습니다.`);
-    els.agentChatStatus.textContent = `${agentLabels[agentKey]} 재검토 기록됨 · ${source || formatRoute(agentKey)}`;
+    setSideStatus(`${agentLabels[agentKey]} 재검토 기록됨 · ${source || formatRoute(agentKey)}`);
     showSpeech(agentKey, "재검토 완료했습니다.");
   } catch (error) {
     addChatHistory(agentKey, `[재검토 오류] ${instruction}`, `ERROR. ${error.message}`, "error");
-    els.agentChatStatus.textContent = "산출물 재검토 오류";
+    setSideStatus("산출물 재검토 오류");
     showSpeech(agentKey, "검토 중 오류가 났어요.");
     addLog(`${agentLabels[agentKey]} 산출물 재검토 오류: ${error.message}`);
   } finally {
     await sleep(1080);
     hideSpeech(agentKey);
-    setTask(running ? "Running" : "Idle", running ? "Pipeline is running" : "Waiting for request");
     els.reviewArtifactButton.disabled = false;
     els.askAgentButton.disabled = false;
   }
