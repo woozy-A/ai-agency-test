@@ -142,6 +142,10 @@ function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function pickOne(items, seed = Date.now()) {
+  return items[Math.abs(seed) % items.length];
+}
+
 async function waitForVisualStep(promise, ms, token, timeoutLog) {
   const timeout = sleep(ms).then(() => ({ timedOut: true }));
   const result = await Promise.race([promise.then(() => ({ timedOut: false })), timeout]);
@@ -368,6 +372,16 @@ function hideAllSpeech() {
   Object.keys(els.agents).forEach(hideSpeech);
 }
 
+function setAgentWorking(agentKey, enabled) {
+  const agent = els.agents[agentKey];
+  if (!agent) return;
+  agent.classList.toggle("working", enabled);
+}
+
+function clearWorkingAgents() {
+  Object.keys(els.agents).forEach((agentKey) => setAgentWorking(agentKey, false));
+}
+
 async function moveAgent(agentKey, point, taskText, token = null) {
   if (token !== null && !isCurrentRun(token)) return false;
   const agent = els.agents[agentKey];
@@ -406,30 +420,83 @@ function addLog(text) {
   if (activeArtifact === "log") renderArtifact();
 }
 
+const heartbeatBeats = [
+  {
+    agent: "mike",
+    log: "PM이 요구사항을 정리하는 중입니다.",
+    lines: ["범위부터 자릅니다.", "사장님 또 큰일 가져오셨네.", "이건 우선순위가 핵심입니다.", "회의록은 짧게, 기준은 선명하게."],
+  },
+  {
+    agent: "jay",
+    log: "구현 담당자가 파일 구조와 테스트 기준을 잡는 중입니다.",
+    lines: ["Codex가 바로 실행하게 써볼게요.", "파일 구조 먼저 고정합니다.", "테스트 명령 빠지면 또 돌아옵니다.", "오늘도 야근각인가요."],
+  },
+  {
+    agent: "yuna",
+    log: "QA가 위험 항목과 검수 시나리오를 확인하는 중입니다.",
+    lines: ["재선택 제한부터 확인해야죠.", "검수 기준 없으면 통과 못 합니다.", "버튼 비활성화도 봅니다.", "사장님, 이건 제가 막겠습니다."],
+  },
+  {
+    agent: "jason",
+    log: "Red Team이 허점과 실패 가능성을 찾는 중입니다.",
+    lines: ["칭찬은 생략합니다.", "이대로 가면 허접해질 수 있어요.", "모호한 요구사항 잡았습니다.", "퇴근하고 싶지만 위험은 봐야죠."],
+  },
+  {
+    agent: "sana",
+    log: "Security가 키 노출과 공개 배포 위험을 점검하는 중입니다.",
+    lines: [".env는 절대 공개 금지.", "API 키 냄새 나는 건 막습니다.", "GitHub Pages면 정적만 안전합니다.", "보안은 귀찮을 때 터집니다."],
+  },
+  {
+    agent: "iris",
+    log: "Prompt Editor가 Codex용 문장을 다듬는 중입니다.",
+    lines: ["문장을 더 날카롭게 줄입니다.", "Codex가 오해할 표현 제거 중.", "결과 형식은 못 박아야 합니다.", "말은 짧게, 지시는 정확하게."],
+  },
+  {
+    agent: "vera",
+    log: "Validation Judge가 품질 점수와 통과 기준을 매기는 중입니다.",
+    lines: ["점수는 냉정하게 갑니다.", "통과 기준부터 확인합니다.", "위험 항목은 감점입니다.", "100점은 쉽게 안 줍니다."],
+  },
+  {
+    agent: "dana",
+    log: "DX가 실행 방법과 사용 흐름을 정리하는 중입니다.",
+    lines: ["실행 방법은 한 줄이어야 합니다.", "처음 쓰는 사람 기준으로 봅니다.", "에러 메시지도 UX입니다.", "사장님이 헷갈리면 실패입니다."],
+  },
+];
+
+function pulseHeartbeatAgent(beat, ticks, token) {
+  if (token !== null && !isCurrentRun(token)) return;
+  clearWorkingAgents();
+  setActiveAgent(beat.agent);
+  setAgentWorking(beat.agent, true);
+  showSpeech(beat.agent, pickOne(beat.lines, ticks + logs.length), token);
+  window.setTimeout(() => {
+    if (token !== null && !isCurrentRun(token)) return;
+    setAgentWorking(beat.agent, false);
+    hideSpeech(beat.agent, token);
+  }, 4200);
+}
+
 function startBackendHeartbeat(label = "AI pipeline", token = null) {
   const startedAt = Date.now();
   let ticks = 0;
-  const messages = [
-    "PM이 요구사항을 정리하는 중입니다.",
-    "구현 담당자가 파일 구조와 테스트 기준을 잡는 중입니다.",
-    "QA가 위험 항목과 검수 시나리오를 확인하는 중입니다.",
-    "Finalizer가 Codex용 프롬프트로 압축할 준비를 하는 중입니다.",
-  ];
 
   if (token === null || isCurrentRun(token)) {
     setTask("Working", `${label} started · 0s`);
     addLog(`${label}: 모델 응답 대기 시작`);
+    pulseHeartbeatAgent(heartbeatBeats[0], ticks, token);
   }
   const timer = window.setInterval(() => {
     if (token !== null && !isCurrentRun(token)) {
+      clearWorkingAgents();
       window.clearInterval(timer);
       return;
     }
     ticks += 1;
     const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-    const message = messages[(ticks - 1) % messages.length];
+    const beat = heartbeatBeats[(ticks - 1) % heartbeatBeats.length];
     setTask("Working", `${label} running · ${elapsed}s`);
-    addLog(`작업 진행 중 (${elapsed}s): ${message}`);
+    addLog(`작업 진행 중 (${elapsed}s): ${beat.log}`);
+    pulseHeartbeatAgent(beat, ticks, token);
   }, 5000);
   return timer;
 }
@@ -713,6 +780,7 @@ function resetOffice() {
   Object.values(els.papers).forEach((paper) => paper.classList.remove("visible"));
   els.deliveryBox.classList.remove("complete");
   hideAllSpeech();
+  clearWorkingAgents();
   setActiveAgent(null);
   setScoreBoard(null);
   setTask("Idle", "Waiting for request");
