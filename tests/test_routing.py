@@ -12,6 +12,7 @@ from server import (
     is_important_request,
     normalize_artifacts,
     project_file_contract,
+    review_focus_for,
     run_role_task,
 )
 
@@ -155,6 +156,13 @@ class ProjectRoutingTest(unittest.TestCase):
 
         self.assertIn("Emergency Dev / 구현안 Output", result)
         self.assertEqual(performance[-1]["status"], "비상 운영")
+
+    def test_artifact_review_focus_is_role_specific(self):
+        self.assertIn("위험", review_focus_for("jason"))
+        self.assertIn("보안", review_focus_for("sana"))
+        self.assertIn("100점", review_focus_for("vera"))
+        self.assertIn("실행 방법", review_focus_for("dana"))
+        self.assertIn("Swift", review_focus_for("jay"))
 
 
 if __name__ == "__main__":

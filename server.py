@@ -668,6 +668,59 @@ def run_agent_chat(agent_key: str, question: str) -> dict:
     }
 
 
+def review_focus_for(agent_key: str) -> str:
+    focuses = {
+        "jason": "위험, 허점, 모호한 요구사항, 실패 가능성만 냉정하게 지적한다.",
+        "sana": "API 키, .env, 개인정보, 공개 저장소, 위험 명령, 보안/프라이버시 문제만 점검한다.",
+        "vera": "100점 만점 점수와 감점 사유, blocking issue, warning을 제시한다.",
+        "dana": "실행 방법, 로컬 환경 전제, 설치/실행 명령, 오류 메시지, 개발자 경험이 충분한지 검토한다.",
+        "jay": "구현 지시, 파일 구조, 테스트 명령, Swift/Xcode/웹 같은 기술 스택 지시가 구체적인지 검토한다.",
+        "yuna": "성공 기준, 자동 테스트, 직접 검수 시나리오, 회귀 위험이 검증 가능하게 적혔는지 본다.",
+        "testkim": "자동화 가능한 테스트와 실패 조건, 수동 검수 절차를 구체화한다.",
+        "iris": "Codex가 오해할 표현, 모호한 문장, 산출물 형식을 다듬는다.",
+        "nora": "범위 초과, 이번에 할 것/하지 않을 것, 과도한 요구를 줄인다.",
+        "mike": "목표, 우선순위, 산출물, 실행 순서가 현실적인지 PM 관점으로 검토한다.",
+        "mina": "사용자 흐름, 화면 상태, UX 검수 기준이 충분한지 본다.",
+    }
+    return focuses.get(agent_key, "자기 역할에 맞는 관점으로만 검토하고, 역할 밖 질문은 담당자를 안내한다.")
+
+
+def run_artifact_review(agent_key: str, artifact_name: str, artifact: str, instruction: str) -> dict:
+    agent = AGENT_ROLES.get(agent_key)
+    if not agent:
+        raise RuntimeError("알 수 없는 직원입니다.")
+    if not artifact:
+        raise RuntimeError("검토할 산출물이 비어 있습니다.")
+
+    provider = get_agent_provider(agent_key)
+    client = require_openai_client() if provider == "openai" else None
+    model = get_agent_model(agent_key)
+    focus = review_focus_for(agent_key)
+    role_prompt = (
+        f"{agent['prompt']} 너의 이름은 {agent['name']}이고 역할은 {agent['role']}다. "
+        f"이번 일은 일반 대화가 아니라 산출물 재검토다. {focus} "
+        "역할 밖의 질문이면 직접 해결하려 하지 말고 어떤 담당자에게 넘겨야 하는지 말한다. "
+        "답변은 한국어로 작성하고, 반드시 '통과/수정 필요', '주요 지적', '다음 조치'를 포함한다."
+    )
+    user_prompt = (
+        f"검토 대상 artifact: {artifact_name}\n\n"
+        f"창우의 추가 지시:\n{instruction or '자기 역할 기준으로 재검토해줘.'}\n\n"
+        f"검토할 산출물:\n{artifact}"
+    )
+    answer = ask_agent(client, agent["name"], role_prompt, user_prompt, model, provider)
+    return {
+        "ok": True,
+        "agent": agent_key,
+        "name": agent["name"],
+        "role": agent["role"],
+        "provider": provider,
+        "model": model,
+        "artifact": artifact_name,
+        "focus": focus,
+        "answer": answer,
+    }
+
+
 def slugify(text: str) -> str:
     slug = re.sub(r"[^0-9A-Za-z가-힣]+", "-", text).strip("-")
     return slug[:40] or "request"
@@ -993,7 +1046,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path not in ("/api/run", "/api/agent-chat"):
+        if path not in ("/api/run", "/api/agent-chat", "/api/review-artifact"):
             self.send_json(404, {"ok": False, "error": "Not found"})
             return
 
@@ -1007,6 +1060,14 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json(400, {"ok": False, "error": "질문을 입력해주세요."})
                     return
                 result = run_agent_chat(agent, question)
+                self.send_json(200, result)
+                return
+            if path == "/api/review-artifact":
+                agent = str(payload.get("agent", "")).strip().lower()
+                artifact_name = str(payload.get("artifact_name", "final")).strip() or "final"
+                artifact = str(payload.get("artifact", "")).strip()
+                instruction = str(payload.get("instruction", "")).strip()
+                result = run_artifact_review(agent, artifact_name, artifact, instruction)
                 self.send_json(200, result)
                 return
 

@@ -104,6 +104,7 @@ const els = {
   agentChatLog: document.querySelector("#agentChatLog"),
   modelRouting: document.querySelector("#modelRouting"),
   askAgentButton: document.querySelector("#askAgentButton"),
+  reviewArtifactButton: document.querySelector("#reviewArtifactButton"),
   exportChatButton: document.querySelector("#exportChatButton"),
   clearChatButton: document.querySelector("#clearChatButton"),
   selectedAgentLabel: document.querySelector("#selectedAgentLabel"),
@@ -547,6 +548,47 @@ async function askAgent(agentKey, question) {
   return payload;
 }
 
+function artifactForReview() {
+  const artifactName = artifacts.final ? "final" : activeArtifact;
+  const artifact = artifacts.final || artifacts[activeArtifact] || "";
+  return { artifactName, artifact };
+}
+
+async function reviewArtifact(agentKey, instruction) {
+  const { artifactName, artifact } = artifactForReview();
+  if (!artifact) {
+    throw new Error("아직 검토할 산출물이 없습니다. Start로 결과물을 먼저 만든 뒤 다시 시도해주세요.");
+  }
+
+  if (!shouldUseBackend()) {
+    await sleep(250);
+    return {
+      answer: `${agentLabels[agentKey]}가 ${artifactName} 산출물을 ${agentRoles[agentKey]} 관점으로 다시 봅니다. 로컬 서버에서는 실제 모델이 통과/수정 필요, 주요 지적, 다음 조치를 작성합니다.`,
+      provider: "simulation",
+      model: "github-pages",
+      artifact: artifactName,
+    };
+  }
+
+  const response = await fetch("/api/review-artifact", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      agent: agentKey,
+      artifact_name: artifactName,
+      artifact,
+      instruction,
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error || "Artifact review failed");
+  }
+  return payload;
+}
+
 function showPaper(key) {
   if (els.papers[key]) els.papers[key].classList.add("visible");
 }
@@ -777,6 +819,36 @@ els.agentChatForm.addEventListener("submit", async (event) => {
     await sleep(1080);
     hideSpeech(agentKey);
     setTask(running ? "Running" : "Idle", running ? "Pipeline is running" : "Waiting for request");
+    els.askAgentButton.disabled = false;
+  }
+});
+
+els.reviewArtifactButton.addEventListener("click", async () => {
+  const agentKey = selectedAgent;
+  const instruction = els.agentQuestion.value.trim() || `${agentLabels[agentKey]} 역할에 맞게 final 산출물을 다시 검사해줘.`;
+  els.reviewArtifactButton.disabled = true;
+  els.askAgentButton.disabled = true;
+  els.agentChatStatus.textContent = `${agentLabels[agentKey]}가 산출물 재검토 중...`;
+  setTask("Reviewing", `${agentLabels[agentKey]} is reviewing final artifact`);
+  showSpeech(agentKey, "산출물 다시 보겠습니다.");
+  try {
+    const payload = await reviewArtifact(agentKey, instruction);
+    const source = payload.provider ? `${payload.provider}/${payload.model}` : "";
+    const artifactName = payload.artifact || "final";
+    addChatHistory(agentKey, `[${artifactName} 재검토] ${instruction}`, payload.answer, source);
+    addLog(`${agentLabels[agentKey]}가 ${artifactName} 산출물을 재검토했습니다.`);
+    els.agentChatStatus.textContent = `${agentLabels[agentKey]} 재검토 기록됨 · ${source || formatRoute(agentKey)}`;
+    showSpeech(agentKey, "재검토 완료했습니다.");
+  } catch (error) {
+    addChatHistory(agentKey, `[재검토 오류] ${instruction}`, `ERROR. ${error.message}`, "error");
+    els.agentChatStatus.textContent = "산출물 재검토 오류";
+    showSpeech(agentKey, "검토 중 오류가 났어요.");
+    addLog(`${agentLabels[agentKey]} 산출물 재검토 오류: ${error.message}`);
+  } finally {
+    await sleep(1080);
+    hideSpeech(agentKey);
+    setTask(running ? "Running" : "Idle", running ? "Pipeline is running" : "Waiting for request");
+    els.reviewArtifactButton.disabled = false;
     els.askAgentButton.disabled = false;
   }
 });
