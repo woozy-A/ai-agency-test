@@ -134,6 +134,7 @@ let activeArtifact = "log";
 let running = false;
 let runToken = 0;
 let activeRequestController = null;
+let activeJobId = null;
 let selectedAgent = "dana";
 let chatHistory = loadChatHistory();
 let agentConfig = defaultAgentConfig;
@@ -163,6 +164,22 @@ function abortActiveRequest() {
     activeRequestController.abort();
     activeRequestController = null;
   }
+  if (activeJobId && shouldUseBackend()) {
+    const jobId = activeJobId;
+    activeJobId = null;
+    fetch("/api/cancel-job", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ job_id: jobId }),
+    }).catch(() => {});
+  }
+}
+
+function createJobId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `job-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function loadChatHistory() {
@@ -476,6 +493,25 @@ function pulseHeartbeatAgent(beat, ticks, token) {
   }, 4200);
 }
 
+function beatForProgressItem(item) {
+  const text = String(item || "").toLowerCase();
+  const agentKey = Object.keys(agentLabels).find((key) => text.includes(agentLabels[key].toLowerCase()) || text.includes(key));
+  if (agentKey && els.agents[agentKey]) {
+    return {
+      agent: agentKey,
+      log: item,
+      lines: [`${agentLabels[agentKey]} 작업 중...`, "서버 진행 로그와 연결됐습니다.", "이번엔 진짜 일하는 중입니다."],
+    };
+  }
+  return null;
+}
+
+function pulseProgressAgent(item, token) {
+  const beat = beatForProgressItem(item);
+  if (!beat) return;
+  pulseHeartbeatAgent(beat, logs.length, token);
+}
+
 function startBackendHeartbeat(label = "AI pipeline", token = null) {
   const startedAt = Date.now();
   let ticks = 0;
@@ -505,9 +541,14 @@ async function runBackendPipeline(request, token, attempt = 0) {
   const heartbeat = startBackendHeartbeat(attempt ? `Retry ${attempt + 1}` : "AI pipeline", token);
   const controller = new AbortController();
   activeRequestController = controller;
+  const requestedJobId = createJobId();
+  activeJobId = requestedJobId;
   let seenProgress = 0;
   const appendProgress = (items = []) => {
-    items.slice(seenProgress).forEach((item) => addLog(`서버 진행: ${item}`));
+    items.slice(seenProgress).forEach((item) => {
+      addLog(`서버 진행: ${item}`);
+      pulseProgressAgent(item, token);
+    });
     seenProgress = items.length;
   };
   try {
@@ -516,7 +557,7 @@ async function runBackendPipeline(request, token, attempt = 0) {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ request }),
+      body: JSON.stringify({ request, job_id: requestedJobId }),
       signal: controller.signal,
     });
     const payload = await response.json();
@@ -525,6 +566,7 @@ async function runBackendPipeline(request, token, attempt = 0) {
     if (!response.ok || !payload.ok || !payload.job_id) {
       throw new Error(payload.error || "AI pipeline job start failed");
     }
+    activeJobId = payload.job_id;
 
     while (isCurrentRun(token)) {
       await sleep(2000);
@@ -541,9 +583,15 @@ async function runBackendPipeline(request, token, attempt = 0) {
         const result = statusPayload.result;
         appendProgress(result?.progress || []);
         if (!result?.ok) throw new Error(result?.error || "AI pipeline request failed");
+        activeJobId = null;
         return result;
       }
+      if (statusPayload.status === "canceled") {
+        activeJobId = null;
+        throw new Error("작업이 취소되었습니다.");
+      }
       if (statusPayload.status === "error") {
+        activeJobId = null;
         if (statusPayload.retryable && attempt < 2) {
           const retryAfter = Math.min(Number(statusPayload.retry_after || 60), 300);
           addLog(`일시 오류. ${retryAfter}초 후 자동 재시도합니다. (${attempt + 1}/2)`);
@@ -584,6 +632,7 @@ async function runBackendPipeline(request, token, attempt = 0) {
   } finally {
     window.clearInterval(heartbeat);
     if (activeRequestController === controller) activeRequestController = null;
+    if (activeJobId && !isCurrentRun(token)) activeJobId = null;
   }
 }
 

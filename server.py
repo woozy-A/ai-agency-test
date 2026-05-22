@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parent
 OUTPUTS = ROOT / "outputs"
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
+PENDING_CANCELS: dict[str, float] = {}
 FORBIDDEN_STATIC_NAMES = {
     ".env",
     ".env.example",
@@ -48,6 +49,7 @@ class PipelineContext:
         self.timeout_seconds = timeout_seconds or int(os.getenv("PIPELINE_TIMEOUT_SECONDS", "900"))
         self.absent_agents: set[str] = set()
         self.progress: list[str] = []
+        self.cancelled = False
         self.lock = threading.Lock()
 
     def add_progress(self, message: str) -> None:
@@ -60,9 +62,15 @@ class PipelineContext:
             return list(self.progress)
 
     def check_timeout(self) -> None:
+        if self.cancelled:
+            raise RuntimeError("작업이 취소되었습니다.")
         elapsed = time.monotonic() - self.started_at
         if elapsed > self.timeout_seconds:
             raise PipelineTimeoutError(f"서버 작업 제한 시간 {self.timeout_seconds}초를 초과했습니다.")
+
+    def cancel(self) -> None:
+        self.cancelled = True
+        self.add_progress("작업 취소 요청을 받았습니다.")
 
 
 def load_env() -> None:
@@ -1467,10 +1475,29 @@ def run_ai_pipeline(request: str, context: PipelineContext | None = None) -> dic
     }
 
 
-def start_pipeline_job(request: str) -> str:
-    job_id = uuid.uuid4().hex
+def start_pipeline_job(request: str, job_id: str | None = None) -> str:
+    cleanup_jobs()
+    if not job_id or not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", job_id):
+        job_id = uuid.uuid4().hex
     context = PipelineContext()
     with JOBS_LOCK:
+        if job_id in JOBS:
+            job_id = uuid.uuid4().hex
+        if job_id in PENDING_CANCELS:
+            PENDING_CANCELS.pop(job_id, None)
+            context.cancel()
+            JOBS[job_id] = {
+                "ok": True,
+                "job_id": job_id,
+                "status": "canceled",
+                "progress": context.snapshot(),
+                "result": None,
+                "error": "사용자가 작업을 취소했습니다.",
+                "context": context,
+                "created_monotonic": time.monotonic(),
+                "started_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            return job_id
         JOBS[job_id] = {
             "ok": True,
             "job_id": job_id,
@@ -1478,6 +1505,8 @@ def start_pipeline_job(request: str) -> str:
             "progress": context.snapshot(),
             "result": None,
             "error": None,
+            "context": context,
+            "created_monotonic": time.monotonic(),
             "started_at": datetime.now().isoformat(timespec="seconds"),
         }
 
@@ -1485,6 +1514,10 @@ def start_pipeline_job(request: str) -> str:
         try:
             result = run_ai_pipeline(request, context)
             with JOBS_LOCK:
+                current = JOBS.get(job_id)
+                if current and current.get("status") == "canceled":
+                    current["progress"] = context.snapshot()
+                    return
                 JOBS[job_id].update(
                     {
                         "status": "done",
@@ -1494,6 +1527,11 @@ def start_pipeline_job(request: str) -> str:
                 )
         except Exception as exc:
             with JOBS_LOCK:
+                current = JOBS.get(job_id)
+                if current and current.get("status") == "canceled":
+                    current["progress"] = context.snapshot()
+                    current["error"] = str(exc)
+                    return
                 JOBS[job_id].update(
                     {
                         "status": "error",
@@ -1508,12 +1546,74 @@ def start_pipeline_job(request: str) -> str:
     return job_id
 
 
+def public_job(job: dict) -> dict:
+    return {key: value for key, value in job.items() if key not in ("context", "created_monotonic")}
+
+
+def job_ttl_seconds() -> int:
+    return int(os.getenv("JOB_TTL_SECONDS", "1800"))
+
+
+def max_jobs() -> int:
+    return int(os.getenv("MAX_JOBS", "20"))
+
+
+def cleanup_jobs() -> None:
+    now = time.monotonic()
+    ttl_seconds = job_ttl_seconds()
+    max_job_count = max_jobs()
+    with JOBS_LOCK:
+        for job_id, created_at in list(PENDING_CANCELS.items()):
+            if now - created_at > ttl_seconds:
+                PENDING_CANCELS.pop(job_id, None)
+        expired = [
+            job_id
+            for job_id, job in JOBS.items()
+            if job.get("status") != "running" and now - float(job.get("created_monotonic", now)) > ttl_seconds
+        ]
+        for job_id in expired:
+            JOBS.pop(job_id, None)
+        overflow = max(0, len(JOBS) - max_job_count)
+        if overflow:
+            sorted_jobs = sorted(JOBS.items(), key=lambda item: float(item[1].get("created_monotonic", now)))
+            for job_id, job in sorted_jobs:
+                if overflow <= 0:
+                    break
+                if job.get("status") == "running":
+                    continue
+                JOBS.pop(job_id, None)
+                overflow -= 1
+
+
+def cancel_pipeline_job(job_id: str) -> dict:
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            if re.fullmatch(r"[A-Za-z0-9_-]{8,80}", job_id):
+                PENDING_CANCELS[job_id] = time.monotonic()
+                return {"ok": True, "job_id": job_id, "status": "canceled", "error": "작업 시작 전 취소 요청을 기록했습니다."}
+            return {"ok": False, "error": "작업을 찾을 수 없습니다."}
+        if job.get("status") in ("done", "error", "canceled"):
+            return public_job(job)
+        context = job.get("context")
+        if isinstance(context, PipelineContext):
+            context.cancel()
+            job["progress"] = context.snapshot()
+        job["status"] = "canceled"
+        job["error"] = "사용자가 작업을 취소했습니다."
+        return public_job(job)
+
+
 def get_pipeline_job(job_id: str) -> dict:
+    cleanup_jobs()
     with JOBS_LOCK:
         job = JOBS.get(job_id)
         if not job:
             return {"ok": False, "error": "작업을 찾을 수 없습니다."}
-        return dict(job)
+        context = job.get("context")
+        if isinstance(context, PipelineContext):
+            job["progress"] = context.snapshot()
+        return public_job(job)
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -1575,13 +1675,18 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path not in ("/api/run", "/api/run-job", "/api/agent-chat", "/api/review-artifact", "/api/rework"):
+        if path not in ("/api/run", "/api/run-job", "/api/cancel-job", "/api/agent-chat", "/api/review-artifact", "/api/rework"):
             self.send_json(404, {"ok": False, "error": "Not found"})
             return
 
         try:
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            if path == "/api/cancel-job":
+                job_id = str(payload.get("job_id", "")).strip()
+                result = cancel_pipeline_job(job_id)
+                self.send_json(200 if result.get("ok") else 404, result)
+                return
             if path == "/api/agent-chat":
                 agent = str(payload.get("agent", "")).strip().lower()
                 question = str(payload.get("question", "")).strip()
@@ -1613,7 +1718,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if path == "/api/run-job":
-                job_id = start_pipeline_job(request)
+                client_job_id = str(payload.get("job_id", "")).strip()
+                job_id = start_pipeline_job(request, client_job_id)
                 self.send_json(202, {"ok": True, "job_id": job_id})
                 return
 

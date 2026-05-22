@@ -1,3 +1,4 @@
+import time
 import unittest
 from unittest.mock import patch
 
@@ -6,11 +7,13 @@ from server import (
     Handler,
     PipelineContext,
     ask_final_editor,
+    cancel_pipeline_job,
     detect_project_type,
     extract_quality_score,
     get_agent_config,
     get_agent_provider,
     get_model_candidates,
+    get_pipeline_job,
     get_pipeline_mode,
     is_important_request,
     normalize_artifacts,
@@ -18,6 +21,7 @@ from server import (
     run_ai_pipeline,
     run_multi_agent_pipeline,
     run_rework_pipeline,
+    start_pipeline_job,
     review_focus_for,
     run_role_task,
 )
@@ -242,6 +246,31 @@ class ProjectRoutingTest(unittest.TestCase):
             {},
         )
         self.assertEqual(score["score"], 91)
+
+    def test_cancel_job_marks_running_job_canceled(self):
+        def slow_pipeline(request, context):
+            time.sleep(0.05)
+            context.check_timeout()
+            return {"ok": True, "artifacts": {}}
+
+        with patch("server.run_ai_pipeline", side_effect=slow_pipeline):
+            job_id = start_pipeline_job("긴 작업")
+            result = cancel_pipeline_job(job_id)
+            time.sleep(0.08)
+            final_status = get_pipeline_job(job_id)
+        self.assertEqual(result["status"], "canceled")
+        self.assertIn("취소", result["error"])
+        self.assertEqual(final_status["status"], "canceled")
+
+    def test_cancel_before_job_start_prevents_worker(self):
+        client_job_id = "client-job-test"
+        result = cancel_pipeline_job(client_job_id)
+        with patch("server.run_ai_pipeline") as mocked_pipeline:
+            job_id = start_pipeline_job("시작 전 취소된 작업", client_job_id)
+            final_status = get_pipeline_job(job_id)
+        self.assertEqual(result["status"], "canceled")
+        self.assertEqual(final_status["status"], "canceled")
+        mocked_pipeline.assert_not_called()
 
     def test_rework_pipeline_generates_rework_prompt(self):
         def fake_review(agent_key, artifact_name, artifact, instruction):
