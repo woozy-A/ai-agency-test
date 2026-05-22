@@ -14,6 +14,7 @@ from server import (
     is_lunch_menu_request,
     normalize_artifacts,
     project_file_contract,
+    run_ai_pipeline,
     run_rework_pipeline,
     run_lunch_menu_fast_lane,
     review_focus_for,
@@ -89,6 +90,7 @@ class ProjectRoutingTest(unittest.TestCase):
 
     def test_important_request_escalates_to_director(self):
         self.assertTrue(is_important_request("신중하게 SwiftUI macOS 앱 프롬프트를 만들어줘"))
+        self.assertTrue(is_important_request("인류의 최대 난제인 점심 메뉴 추천 앱을 신중하게 만들어줘"))
         self.assertFalse(is_important_request("간단한 투두 앱 프롬프트 만들어줘"))
 
     def test_agent_config_exposes_finalizer_fallbacks(self):
@@ -185,6 +187,16 @@ class ProjectRoutingTest(unittest.TestCase):
         self.assertIn("100개 이상", artifacts["final"])
         self.assertIn("재선택 3번", artifacts["final"])
         self.assertTrue(any(item["path"] == "generated_prompt/codex_prompt.md" for item in files))
+
+    def test_important_lunch_menu_request_skips_fast_lane(self):
+        request = "진짜 중요한 문제야 인류의 최대 난제인 점심 메뉴 추천 웹앱을 신중하게 만들어줘"
+        self.assertTrue(is_lunch_menu_request(request))
+        self.assertTrue(is_important_request(request))
+        with patch("server.run_multi_agent_pipeline", return_value=({"final": "회의 결과"}, [], 3, "multi/models")):
+            with patch("server.save_run") as fake_save:
+                fake_save.return_value.relative_to.return_value = "outputs/test"
+                result = run_ai_pipeline(request)
+        self.assertEqual(result["mode"], "multi")
 
     def test_rework_pipeline_generates_rework_prompt(self):
         def fake_review(agent_key, artifact_name, artifact, instruction):

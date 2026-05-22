@@ -119,9 +119,14 @@ def is_important_request(request: str) -> bool:
     lowered = request.lower()
     markers = (
         "중요",
+        "진짜 중요한",
+        "매우 중요",
         "신중",
         "퀄리티",
         "품질",
+        "난제",
+        "최대 난제",
+        "인류",
         "프로덕션",
         "배포",
         "상용",
@@ -1186,8 +1191,9 @@ def run_ai_pipeline(request: str) -> dict:
     provider = get_provider()
     client = require_openai_client() if provider == "openai" else None
     mode = get_pipeline_mode()
+    important = is_important_request(request)
 
-    if is_lunch_menu_request(request):
+    if is_lunch_menu_request(request) and not important:
         artifacts, files, calls, model_summary = run_lunch_menu_fast_lane(request)
         mode = "fast_lane"
     elif mode == "multi":
