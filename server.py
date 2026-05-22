@@ -4,18 +4,22 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import traceback
+import uuid
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
-from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parent
 OUTPUTS = ROOT / "outputs"
+JOBS: dict[str, dict] = {}
+JOBS_LOCK = threading.Lock()
 FORBIDDEN_STATIC_NAMES = {
     ".env",
     ".env.example",
@@ -32,6 +36,33 @@ class RetryableAIError(RuntimeError):
     def __init__(self, message: str, retry_after: int = 60):
         super().__init__(message)
         self.retry_after = retry_after
+
+
+class PipelineTimeoutError(RuntimeError):
+    pass
+
+
+class PipelineContext:
+    def __init__(self, timeout_seconds: int | None = None):
+        self.started_at = time.monotonic()
+        self.timeout_seconds = timeout_seconds or int(os.getenv("PIPELINE_TIMEOUT_SECONDS", "900"))
+        self.absent_agents: set[str] = set()
+        self.progress: list[str] = []
+        self.lock = threading.Lock()
+
+    def add_progress(self, message: str) -> None:
+        elapsed = int(time.monotonic() - self.started_at)
+        with self.lock:
+            self.progress.append(f"{elapsed}s · {message}")
+
+    def snapshot(self) -> list[str]:
+        with self.lock:
+            return list(self.progress)
+
+    def check_timeout(self) -> None:
+        elapsed = time.monotonic() - self.started_at
+        if elapsed > self.timeout_seconds:
+            raise PipelineTimeoutError(f"서버 작업 제한 시간 {self.timeout_seconds}초를 초과했습니다.")
 
 
 def load_env() -> None:
@@ -419,15 +450,25 @@ def run_role_task(
     user_prompt: str,
     request: str,
     performance: list[dict[str, str]],
+    context: PipelineContext | None = None,
 ) -> str:
     failures = []
     for index, agent_key in enumerate(ROLE_FALLBACKS[role_key]):
+        if context:
+            context.check_timeout()
+            if agent_key in context.absent_agents:
+                failures.append(f"{AGENT_ROLES[agent_key]['name']}(이번 run에서 이미 결근 처리되어 재호출 금지)")
+                continue
         agent = AGENT_ROLES[agent_key]
         provider = get_agent_provider(agent_key)
         model = get_agent_model(agent_key)
         route = f"{provider}/{model}"
         try:
+            if context:
+                context.add_progress(f"{role_label}: {agent['name']} 작업 시작 ({route})")
             result = ask_agent(client, agent["name"], role_prompt, user_prompt, model, provider)
+            if context:
+                context.add_progress(f"{role_label}: {agent['name']} 작업 완료")
             performance.append(
                 {
                     "role": role_label,
@@ -440,6 +481,9 @@ def run_role_task(
             return result
         except Exception as exc:
             failure = role_absence_summary(exc)
+            if context:
+                context.absent_agents.add(agent_key)
+                context.add_progress(f"{role_label}: {agent['name']} 결근 처리 - {failure}")
             failures.append(f"{agent['name']}({failure})")
             performance.append(
                 {
@@ -907,6 +951,14 @@ def run_rework_pipeline(original_request: str, result: str, extra_context: str =
 def extract_quality_score(files: list[dict[str, str]], artifacts: dict[str, str]) -> dict | None:
     sources = []
     for item in files:
+        if item["path"].endswith("quality_score.json"):
+            try:
+                data = json.loads(item["content"])
+                score = data.get("score")
+                if isinstance(score, int):
+                    return {"score": max(0, min(100, score)), "text": item["content"][:1200]}
+            except (json.JSONDecodeError, TypeError):
+                pass
         if item["path"].endswith("quality_score.md"):
             sources.append(item["content"])
     sources.extend([artifacts.get("review", ""), artifacts.get("final", "")])
@@ -951,6 +1003,20 @@ REQUIRED_CODEX_PROMPT_SECTIONS = [
 
 def required_prompt_sections_text() -> str:
     return "\n".join(f"- {section}" for section in REQUIRED_CODEX_PROMPT_SECTIONS)
+
+
+def format_generated_files(files: list[dict[str, str]]) -> str:
+    sections = ["# Generated Prompt Files", ""]
+    for item in files:
+        sections.extend(
+            [
+                f"## {item['path']}",
+                "",
+                item["content"],
+                "",
+            ]
+        )
+    return "\n".join(sections).strip()
 
 
 def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
@@ -1028,7 +1094,11 @@ Codex 작업 설계 규칙:
     return artifacts, files, 1, model
 
 
-def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
+def run_multi_agent_pipeline(
+    client,
+    request: str,
+    context: PipelineContext | None = None,
+) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
     mike_role = (
         "너는 Changwoo Prompt Agency의 PM/기획 Mike다. 창우 사장의 요청을 요구사항, 구현 범위, "
         "하지 않을 일, 성공 기준으로 정리한다. 빠른 요약보다 좋은 Codex 작업지시서를 만드는 것이 목적이다. "
@@ -1092,6 +1162,8 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
     yuna_model = get_agent_model("yuna")
     important = is_important_request(request)
     performance = []
+    if context:
+        context.add_progress("파이프라인 시작: 역할별 작업지시서 회의 준비")
 
     brief = run_role_task(
         client,
@@ -1101,6 +1173,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         f"창우의 요청:\n{request}\n\n1) 요구사항\n2) 구현 범위\n3) 성공 기준\n4) Jay/Yuna가 봐야 할 쟁점을 작성해줘.",
         request,
         performance,
+        context,
     )
     design = run_role_task(
         client,
@@ -1112,6 +1185,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         "반드시 포함: 사용자 흐름, 첫 화면 레이아웃, 주요 컴포넌트, 디자인 톤, 빈/로딩/오류/성공 상태, 모바일/데스크톱 반응형, 접근성 기준.",
         request,
         performance,
+        context,
     )
     dev = run_role_task(
         client,
@@ -1121,6 +1195,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\nMina 결과:\n{design}\n\nCodex가 실제 코드 작성/수정에 착수할 수 있도록 구현안, 파일 구조, 명령어, 테스트 전략을 작성해줘.",
         request,
         performance,
+        context,
     )
     review = run_role_task(
         client,
@@ -1130,6 +1205,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\n버그, 성능, 예외 케이스, 누락된 검증을 중심으로 비판해줘.",
         request,
         performance,
+        context,
     )
     scope = run_role_task(
         client,
@@ -1139,6 +1215,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\n이번 Codex 작업에서 구현할 MVP, 다음 버전, 하지 않을 일을 나눠줘.",
         request,
         performance,
+        context,
     )
     dx = run_role_task(
         client,
@@ -1148,6 +1225,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         f"원 요청:\n{request}\n\nJay:\n{dev}\n\nYuna:\n{review}\n\nCodex 결과물을 실행하고 검수하기 위한 환경 전제, 실행 명령, 샘플 데이터, 실패 시 확인할 점을 정리해줘.",
         request,
         performance,
+        context,
     )
     redteam = run_role_task(
         client,
@@ -1157,6 +1235,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         f"원 요청:\n{request}\n\n현재 산출물:\n{brief}\n\n{design}\n\n{dev}\n\n{review}\n\n과장된 기능, 실패 가능성, 구현 난이도, 비즈니스 리스크만 지적해줘.",
         request,
         performance,
+        context,
     )
     security = run_role_task(
         client,
@@ -1166,6 +1245,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         f"원 요청:\n{request}\n\n제품/기술 초안:\n{design}\n\n{dev}\n\n카메라, 이미지, 위치, 크레딧, 개인정보, API 키, 공개 배포 보안 위험을 점검해줘.",
         request,
         performance,
+        context,
     )
     editor = run_role_task(
         client,
@@ -1175,6 +1255,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\nNora:\n{scope}\n\nDana:\n{dx}\n\nJason:\n{redteam}\n\nSana:\n{security}\n\nCodex가 오해할 표현을 줄이고 최종 프롬프트에 넣을 구조를 정리해줘.",
         request,
         performance,
+        context,
     )
     judge = run_role_task(
         client,
@@ -1186,6 +1267,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         "품질 점수, blocking issue, 수정 필요 항목, 필수 섹션별 통과/누락 여부를 평가해줘.",
         request,
         performance,
+        context,
     )
     final_prompt_input = (
         f"{PROMPT_COMPANY_PRINCIPLES}\n\n"
@@ -1197,10 +1279,17 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         "Codex가 실제 MVP를 구현하고, 구현 후 자동 검증과 수동 검수 보고까지 하도록 지시해. "
         "디자인 권장사항과 화면/상태 설계를 반드시 포함해. 마지막에는 이 프롬프트가 좋은 이유를 짧은 체크리스트로 포함해."
     )
+    if context:
+        context.check_timeout()
+        context.add_progress("Finalizer: 최종 Codex 프롬프트 압축 시작")
     try:
         final, final_route = ask_final_editor(client, final_role, final_prompt_input, important)
+        if context:
+            context.add_progress(f"Finalizer: 최종 프롬프트 납품 완료 ({final_route})")
     except Exception as exc:
         final_route = "internal/emergency-finalizer"
+        if context:
+            context.add_progress(f"Finalizer: 비상 납품 전환 - {role_absence_summary(exc)}")
         final = (
             "# Codex 실행 프롬프트\n\n"
             "아래 요청을 구현 전에 성공 기준을 먼저 세우고, 구현 후 자동 검증과 직접 검수 시나리오를 보고하는 방식으로 처리해줘.\n\n"
@@ -1263,6 +1352,23 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         {"path": "generated_prompt/quality_score.md", "content": judge},
         {"path": "generated_prompt/why_this_prompt_works.md", "content": editor},
     ]
+    parsed_score = extract_quality_score(files, {"review": artifacts["review"], "final": final}) or {}
+    files.append(
+        {
+            "path": "generated_prompt/quality_score.json",
+            "content": json.dumps(
+                {
+                    "score": parsed_score.get("score"),
+                    "source": "Vera",
+                    "route": get_agent_route("vera"),
+                    "note": "score가 null이면 Vera 텍스트에서 안정적인 점수를 찾지 못한 것입니다.",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        }
+    )
+    artifacts["files"] = format_generated_files(files)
     models = (
         f"Mike={mike_provider}/{mike_model}, Mina={mina_provider}/{mina_model}, Jay={jay_provider}/{jay_model}, "
         f"Yuna={yuna_provider}/{yuna_model}, Nora={get_agent_provider('nora')}/{get_agent_model('nora')}, "
@@ -1325,18 +1431,25 @@ def get_agent_config() -> dict:
     }
 
 
-def run_ai_pipeline(request: str) -> dict:
+def run_ai_pipeline(request: str, context: PipelineContext | None = None) -> dict:
     provider = get_provider()
     client = require_openai_client() if provider == "openai" else None
     mode = get_pipeline_mode()
+    context = context or PipelineContext()
+    context.add_progress("서버가 요청을 접수했습니다.")
     if mode == "multi":
-        artifacts, files, calls, model_summary = run_multi_agent_pipeline(client, request)
+        artifacts, files, calls, model_summary = run_multi_agent_pipeline(client, request, context)
     elif mode == "one_call":
+        context.check_timeout()
+        context.add_progress("one_call 오케스트레이터 작업 시작")
         artifacts, files, calls, model_summary = run_one_call_pipeline(client, request)
     else:
         raise RuntimeError("AI_PIPELINE_MODE는 one_call 또는 multi 여야 합니다.")
 
+    context.check_timeout()
+    context.add_progress("산출물을 outputs 폴더에 저장하는 중입니다.")
     output_dir = save_run(request, artifacts, files)
+    context.add_progress("파이프라인 완료")
 
     return {
         "ok": True,
@@ -1349,8 +1462,58 @@ def run_ai_pipeline(request: str) -> dict:
         "output_dir": str(output_dir.relative_to(ROOT)),
         "files": [item["path"] for item in files],
         "quality_score": extract_quality_score(files, artifacts),
+        "progress": context.snapshot(),
         "artifacts": artifacts,
     }
+
+
+def start_pipeline_job(request: str) -> str:
+    job_id = uuid.uuid4().hex
+    context = PipelineContext()
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            "ok": True,
+            "job_id": job_id,
+            "status": "running",
+            "progress": context.snapshot(),
+            "result": None,
+            "error": None,
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    def worker() -> None:
+        try:
+            result = run_ai_pipeline(request, context)
+            with JOBS_LOCK:
+                JOBS[job_id].update(
+                    {
+                        "status": "done",
+                        "progress": context.snapshot(),
+                        "result": result,
+                    }
+                )
+        except Exception as exc:
+            with JOBS_LOCK:
+                JOBS[job_id].update(
+                    {
+                        "status": "error",
+                        "progress": context.snapshot(),
+                        "error": str(exc),
+                        "retryable": isinstance(exc, RetryableAIError),
+                        "retry_after": getattr(exc, "retry_after", None),
+                    }
+                )
+
+    threading.Thread(target=worker, daemon=True).start()
+    return job_id
+
+
+def get_pipeline_job(job_id: str) -> dict:
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            return {"ok": False, "error": "작업을 찾을 수 없습니다."}
+        return dict(job)
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -1385,13 +1548,19 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/api/agent-config":
             try:
                 self.send_json(200, get_agent_config())
             except Exception as exc:
                 traceback.print_exc()
                 self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if path == "/api/run-status":
+            job_id = parse_qs(parsed.query).get("job_id", [""])[0]
+            payload = get_pipeline_job(job_id)
+            self.send_json(200 if payload.get("ok") else 404, payload)
             return
         if self.is_forbidden_static_path(self.path):
             self.send_error(403, "Forbidden")
@@ -1406,7 +1575,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path not in ("/api/run", "/api/agent-chat", "/api/review-artifact", "/api/rework"):
+        if path not in ("/api/run", "/api/run-job", "/api/agent-chat", "/api/review-artifact", "/api/rework"):
             self.send_json(404, {"ok": False, "error": "Not found"})
             return
 
@@ -1441,6 +1610,11 @@ class Handler(SimpleHTTPRequestHandler):
             request = str(payload.get("request", "")).strip()
             if not request:
                 self.send_json(400, {"ok": False, "error": "요청 내용을 입력해주세요."})
+                return
+
+            if path == "/api/run-job":
+                job_id = start_pipeline_job(request)
+                self.send_json(202, {"ok": True, "job_id": job_id})
                 return
 
             result = run_ai_pipeline(request)

@@ -505,7 +505,59 @@ async function runBackendPipeline(request, token, attempt = 0) {
   const heartbeat = startBackendHeartbeat(attempt ? `Retry ${attempt + 1}` : "AI pipeline", token);
   const controller = new AbortController();
   activeRequestController = controller;
+  let seenProgress = 0;
+  const appendProgress = (items = []) => {
+    items.slice(seenProgress).forEach((item) => addLog(`서버 진행: ${item}`));
+    seenProgress = items.length;
+  };
   try {
+    const response = await fetch("/api/run-job", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ request }),
+      signal: controller.signal,
+    });
+    const payload = await response.json();
+    if (!isCurrentRun(token)) throw new Error("작업이 취소되었습니다.");
+    if (response.status === 404) throw new Error("Job API unavailable");
+    if (!response.ok || !payload.ok || !payload.job_id) {
+      throw new Error(payload.error || "AI pipeline job start failed");
+    }
+
+    while (isCurrentRun(token)) {
+      await sleep(2000);
+      if (!isCurrentRun(token)) throw new Error("작업이 취소되었습니다.");
+      const statusResponse = await fetch(`/api/run-status?job_id=${encodeURIComponent(payload.job_id)}`, {
+        signal: controller.signal,
+      });
+      const statusPayload = await statusResponse.json();
+      appendProgress(statusPayload.progress || []);
+      if (!statusResponse.ok || !statusPayload.ok) {
+        throw new Error(statusPayload.error || "AI pipeline status failed");
+      }
+      if (statusPayload.status === "done") {
+        const result = statusPayload.result;
+        appendProgress(result?.progress || []);
+        if (!result?.ok) throw new Error(result?.error || "AI pipeline request failed");
+        return result;
+      }
+      if (statusPayload.status === "error") {
+        if (statusPayload.retryable && attempt < 2) {
+          const retryAfter = Math.min(Number(statusPayload.retry_after || 60), 300);
+          addLog(`일시 오류. ${retryAfter}초 후 자동 재시도합니다. (${attempt + 1}/2)`);
+          setTask("Retrying", `Waiting ${retryAfter}s before retry`);
+          await sleep(retryAfter * 1000);
+          if (!isCurrentRun(token)) throw new Error("작업이 취소되었습니다.");
+          return runBackendPipeline(request, token, attempt + 1);
+        }
+        throw new Error(statusPayload.error || "AI pipeline request failed");
+      }
+    }
+    throw new Error("작업이 취소되었습니다.");
+  } catch (error) {
+    if (error.message !== "Job API unavailable") throw error;
     const response = await fetch("/api/run", {
       method: "POST",
       headers: {
@@ -527,6 +579,7 @@ async function runBackendPipeline(request, token, attempt = 0) {
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error || "AI pipeline request failed");
     }
+    appendProgress(payload.progress || []);
     return payload;
   } finally {
     window.clearInterval(heartbeat);
@@ -601,6 +654,20 @@ function createSimulationArtifacts(request) {
       "로컬 실행판:",
       "`python3 server.py`로 열면 실제 AI가 Codex용 프롬프트 패키지를 만든다.",
     ].join("\n"),
+    files: [
+      "# Generated Prompt Files",
+      "",
+      "## generated_prompt/codex_prompt.md",
+      "최종 Codex 실행 프롬프트",
+      "",
+      "## generated_prompt/design_recommendations.md",
+      "Mina의 디자인 권장사항",
+      "",
+      "## generated_prompt/why_this_prompt_works.md",
+      "Iris의 프롬프트 학습 포인트",
+      "",
+      "로컬 서버 실행 시 모든 generated_prompt 파일 내용이 여기에 표시됩니다.",
+    ].join("\n"),
     hr: [
       "# 인사평가 및 기여도 평가",
       "",
@@ -632,11 +699,11 @@ function shouldUseBackend() {
 }
 
 function updateArtifactCount() {
-  const created = ["log", "brief", "plan", "design", "dev", "review", "final", "hr"].filter((key) => {
+  const created = ["log", "brief", "plan", "design", "dev", "review", "final", "files", "hr"].filter((key) => {
     if (key === "log") return logs.length > 0;
     return Boolean(artifacts[key]);
   }).length;
-  els.artifactCount.textContent = `${created}/8`;
+  els.artifactCount.textContent = `${created}/9`;
 }
 
 function renderArtifact() {
@@ -965,6 +1032,7 @@ async function runOffice() {
   if (!isCurrentRun(token)) return;
   artifacts.review = pendingArtifacts.review;
   artifacts.final = pendingArtifacts.final;
+  artifacts.files = pendingArtifacts.files;
   artifacts.hr = pendingArtifacts.hr;
   showPaper("final");
   els.deliveryBox.classList.add("complete");

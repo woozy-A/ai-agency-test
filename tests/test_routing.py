@@ -4,6 +4,7 @@ from unittest.mock import patch
 from server import (
     AGENT_ROLES,
     Handler,
+    PipelineContext,
     ask_final_editor,
     detect_project_type,
     extract_quality_score,
@@ -206,7 +207,41 @@ class ProjectRoutingTest(unittest.TestCase):
         self.assertTrue(any(item["path"] == "generated_prompt/codex_prompt.md" for item in files))
         self.assertTrue(any(item["path"] == "generated_prompt/design_recommendations.md" for item in files))
         self.assertTrue(any(item["path"] == "generated_prompt/why_this_prompt_works.md" for item in files))
+        self.assertTrue(any(item["path"] == "generated_prompt/quality_score.json" for item in files))
+        self.assertIn("generated_prompt/codex_prompt.md", artifacts["files"])
         self.assertIn("Nora=", models)
+
+    def test_absent_agent_is_not_recalled_in_same_run(self):
+        calls = []
+
+        def fake_ask(client, agent_name, role_prompt, user_prompt, model, provider=None):
+            calls.append(agent_name)
+            if agent_name == "Jason":
+                raise RuntimeError("vacation")
+            if agent_name == "Vera":
+                return "Total: 81/100"
+            return f"{agent_name} output"
+
+        with patch("server.ask_agent", side_effect=fake_ask):
+            with patch("server.ask_final_editor", return_value=("final prompt", "gemini/test")):
+                artifacts, files, calls_count, models = run_multi_agent_pipeline(
+                    None,
+                    "보안이 중요한 카메라 앱 MVP",
+                    PipelineContext(timeout_seconds=60),
+                )
+
+        self.assertEqual(calls.count("Jason"), 1)
+        self.assertIn("결근", artifacts["hr"])
+
+    def test_quality_score_json_takes_priority(self):
+        score = extract_quality_score(
+            [
+                {"path": "generated_prompt/quality_score.md", "content": "Total: 77/100"},
+                {"path": "generated_prompt/quality_score.json", "content": '{"score": 91}'},
+            ],
+            {},
+        )
+        self.assertEqual(score["score"], 91)
 
     def test_rework_pipeline_generates_rework_prompt(self):
         def fake_review(agent_key, artifact_name, artifact, instruction):
