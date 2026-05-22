@@ -11,12 +11,10 @@ from server import (
     get_agent_provider,
     get_model_candidates,
     is_important_request,
-    is_lunch_menu_request,
     normalize_artifacts,
     project_file_contract,
     run_ai_pipeline,
     run_rework_pipeline,
-    run_lunch_menu_fast_lane,
     review_focus_for,
     run_role_task,
 )
@@ -178,20 +176,8 @@ class ProjectRoutingTest(unittest.TestCase):
         self.assertIn("실행 방법", review_focus_for("dana"))
         self.assertIn("Swift", review_focus_for("jay"))
 
-    def test_lunch_menu_request_uses_fast_lane(self):
+    def test_lunch_menu_request_uses_multi_pipeline(self):
         request = "점심 메뉴 랜덤으로 선택하는 웹앱 만들어줘"
-        self.assertTrue(is_lunch_menu_request(request))
-        artifacts, files, calls, model = run_lunch_menu_fast_lane(request)
-        self.assertEqual(calls, 0)
-        self.assertIn("FastLane", model)
-        self.assertIn("100개 이상", artifacts["final"])
-        self.assertIn("재선택 3번", artifacts["final"])
-        self.assertTrue(any(item["path"] == "generated_prompt/codex_prompt.md" for item in files))
-
-    def test_important_lunch_menu_request_skips_fast_lane(self):
-        request = "진짜 중요한 문제야 인류의 최대 난제인 점심 메뉴 추천 웹앱을 신중하게 만들어줘"
-        self.assertTrue(is_lunch_menu_request(request))
-        self.assertTrue(is_important_request(request))
         with patch("server.run_multi_agent_pipeline", return_value=({"final": "회의 결과"}, [], 3, "multi/models")):
             with patch("server.save_run") as fake_save:
                 fake_save.return_value.relative_to.return_value = "outputs/test"
