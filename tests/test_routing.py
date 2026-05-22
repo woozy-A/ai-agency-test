@@ -10,10 +10,12 @@ from server import (
     get_agent_config,
     get_agent_provider,
     get_model_candidates,
+    get_pipeline_mode,
     is_important_request,
     normalize_artifacts,
     project_file_contract,
     run_ai_pipeline,
+    run_multi_agent_pipeline,
     run_rework_pipeline,
     review_focus_for,
     run_role_task,
@@ -89,7 +91,11 @@ class ProjectRoutingTest(unittest.TestCase):
     def test_important_request_escalates_to_director(self):
         self.assertTrue(is_important_request("신중하게 SwiftUI macOS 앱 프롬프트를 만들어줘"))
         self.assertTrue(is_important_request("인류의 최대 난제인 점심 메뉴 추천 앱을 신중하게 만들어줘"))
+        self.assertTrue(is_important_request("Object Detection과 CoreML을 쓰는 B2B 플랫폼 MVP를 제대로 설계해줘"))
         self.assertFalse(is_important_request("간단한 투두 앱 프롬프트 만들어줘"))
+
+    def test_default_pipeline_mode_is_multi(self):
+        self.assertEqual(get_pipeline_mode(), "multi")
 
     def test_agent_config_exposes_finalizer_fallbacks(self):
         config = get_agent_config()
@@ -183,6 +189,20 @@ class ProjectRoutingTest(unittest.TestCase):
                 fake_save.return_value.relative_to.return_value = "outputs/test"
                 result = run_ai_pipeline(request)
         self.assertEqual(result["mode"], "multi")
+
+    def test_multi_pipeline_uses_extended_prompt_company(self):
+        def fake_ask(client, agent_name, role_prompt, user_prompt, model, provider=None):
+            return f"{agent_name} output"
+
+        with patch("server.ask_agent", side_effect=fake_ask):
+            with patch("server.ask_final_editor", return_value=("final prompt", "gemini/test")):
+                artifacts, files, calls, models = run_multi_agent_pipeline(None, "카메라 분리수거 플랫폼 MVP를 제대로 설계해줘")
+
+        self.assertGreaterEqual(calls, 10)
+        self.assertIn("Jason Red Team", artifacts["review"])
+        self.assertIn("Sana Security", artifacts["review"])
+        self.assertTrue(any(item["path"] == "generated_prompt/codex_prompt.md" for item in files))
+        self.assertIn("Nora=", models)
 
     def test_rework_pipeline_generates_rework_prompt(self):
         def fake_review(agent_key, artifact_name, artifact, instruction):

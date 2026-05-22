@@ -112,7 +112,7 @@ def get_agent_route(agent_key: str) -> dict[str, str | list[str]]:
 
 def get_pipeline_mode() -> str:
     load_env()
-    return os.getenv("AI_PIPELINE_MODE", "one_call").strip().lower()
+    return os.getenv("AI_PIPELINE_MODE", "multi").strip().lower()
 
 
 def is_important_request(request: str) -> bool:
@@ -124,9 +124,20 @@ def is_important_request(request: str) -> bool:
         "신중",
         "퀄리티",
         "품질",
+        "제대로",
         "난제",
         "최대 난제",
         "인류",
+        "mvp",
+        "비즈니스 모델",
+        "수익",
+        "플랫폼",
+        "확장성",
+        "정부지원",
+        "b2b",
+        "object detection",
+        "coreml",
+        "ar",
         "프로덕션",
         "배포",
         "상용",
@@ -143,7 +154,7 @@ def is_important_request(request: str) -> bool:
         "security",
         "payment",
     )
-    return any(marker in lowered for marker in markers)
+    return len(request.strip()) >= 500 or any(marker in lowered for marker in markers)
 
 
 def require_openai_client():
@@ -374,6 +385,12 @@ ROLE_FALLBACKS = {
     "structure": ["mina", "nora", "dana"],
     "dev": ["jay", "dana", "mike"],
     "qa": ["yuna", "testkim", "jason", "vera"],
+    "scope": ["nora", "mike", "iris"],
+    "dx": ["dana", "jay", "testkim"],
+    "redteam": ["jason", "yuna", "vera"],
+    "security": ["sana", "jason", "dana"],
+    "editor": ["iris", "mike", "vera"],
+    "judge": ["vera", "yuna", "jason"],
 }
 
 
@@ -955,23 +972,53 @@ Codex 작업 설계 규칙:
 def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
     mike_role = (
         "너는 Changwoo Prompt Agency의 PM/기획 Mike다. 창우 사장의 요청을 요구사항, 구현 범위, "
-        "하지 않을 일, 성공 기준으로 정리한다. 답변은 한국어로 쓰고 Codex가 이어받기 쉽게 구체적으로 쓴다."
+        "하지 않을 일, 성공 기준으로 정리한다. 빠른 요약보다 좋은 Codex 작업지시서를 만드는 것이 목적이다. "
+        "앱 요청은 Codex가 MVP 수준까지 실제 구현하고, 가능하면 그 이상도 판단해 구현하도록 전제한다. "
+        "답변은 한국어로 쓰고 Codex가 이어받기 쉽게 구체적으로 쓴다."
     )
     mina_role = (
         "너는 Changwoo Prompt Agency의 기획 보조 Mina다. Mike의 범위를 보고 사용자 흐름, 화면/파일 구조, "
-        "산출물 형태를 정리한다. 최종 Codex 프롬프트에 들어갈 구조만 간결하게 제안한다."
+        "산출물 형태를 정리한다. 초보자가 프롬프트 작성법을 배울 수 있도록 왜 이 구조가 필요한지도 짧게 남긴다."
     )
     jay_role = (
         "너는 Changwoo Prompt Agency의 Dev/구현안 Jay다. Mike와 Mina의 내용을 바탕으로 Codex가 수정할 "
-        "파일, 코드 구조, 명령어, 테스트 전략을 제안한다. Swift, 웹, 로컬 서버 같은 프로젝트 타입별 차이를 구분한다."
+        "파일, 코드 구조, 명령어, 테스트 전략을 제안한다. Swift, 웹, 로컬 서버 같은 프로젝트 타입별 차이를 구분한다. "
+        "Codex에게 '알아서 MVP를 구현하라'가 아니라, 어떤 파일과 동작을 구현해야 MVP인지 명확히 지시한다."
     )
     yuna_role = (
         "너는 Changwoo Prompt Agency의 QA/비판 Yuna다. brief, structure, dev 결과에서 버그, 성능, 예외 케이스, "
         "모호한 요구사항을 찾는다. 칭찬보다 실패 가능성과 검증 방법을 우선한다."
     )
+    nora_role = (
+        "너는 Scope Manager Nora다. 큰 아이디어를 Codex가 이번 작업에서 구현할 MVP, 다음 버전, 하지 않을 일로 나눈다. "
+        "너무 작게 잘라 가치가 사라지지 않게 하되, 한 번에 구현 가능한 범위로 정리한다."
+    )
+    dana_role = (
+        "너는 Developer Experience 담당 Dana다. Codex가 만든 결과물을 창우가 바로 실행하고 검수할 수 있게 "
+        "설치, 실행, 환경 변수, 샘플 데이터, 실패 시 확인할 포인트를 정리한다."
+    )
+    jason_role = (
+        "너는 Red Team Reviewer Jason이다. 사업/제품/기술 관점에서 실패할 가능성, 과장된 주장, 구현 난이도, "
+        "법적/운영 리스크를 칭찬 없이 지적한다."
+    )
+    sana_role = (
+        "너는 Security & Privacy 담당 Sana다. 카메라, 이미지, 위치, 결제/크레딧, 사용자 데이터, 공개 저장소, API 키, "
+        "모델 추론 결과의 책임 문제를 점검한다."
+    )
+    iris_role = (
+        "너는 Prompt Editor Iris다. 앞 단계 결과를 Codex가 오해하지 않는 문장으로 정리한다. "
+        "모호한 표현을 지우고 산출물 형식, 구현 순서, 완료 보고 형식을 선명하게 만든다."
+    )
+    vera_role = (
+        "너는 Validation Judge Vera다. 최종 프롬프트가 초보자에게 학습 가치가 있는지, Codex가 MVP 이상을 구현할 만큼 "
+        "충분히 구체적인지 100점 만점으로 평가하고 blocking issue를 표시한다."
+    )
     final_role = (
-        "너는 Final Editor다. 앞 단계 산출물을 압축해서 창우가 Codex에 그대로 붙여넣을 수 있는 최종 프롬프트로 만든다. "
-        "반드시 다음 섹션을 포함한다: 목표, 작업 범위, 구현 지시, 테스트/검수 기준, 위험 항목, 완료 보고 형식."
+        "너는 Final Editor다. 앞 단계 산출물을 단순 요약하지 말고, 창우가 Codex에 그대로 붙여넣으면 "
+        "MVP 수준의 실제 결과물이 나오도록 최종 프롬프트로 재구성한다. "
+        "빠른 답보다 정확하고 검증 가능한 작업지시서를 우선한다. "
+        "반드시 다음 섹션을 포함한다: 목표, MVP 범위, 구현 지시, 파일 구조, 자동 테스트, 직접 검수 시나리오, "
+        "보안/개인정보 주의사항, 위험 항목, 완료 보고 형식."
     )
 
     mike_provider = get_agent_provider("mike")
@@ -1021,9 +1068,66 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         request,
         performance,
     )
+    scope = run_role_task(
+        client,
+        "scope",
+        "Scope / 범위 관리",
+        nora_role,
+        f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\n이번 Codex 작업에서 구현할 MVP, 다음 버전, 하지 않을 일을 나눠줘.",
+        request,
+        performance,
+    )
+    dx = run_role_task(
+        client,
+        "dx",
+        "DX / 실행 경험",
+        dana_role,
+        f"원 요청:\n{request}\n\nJay:\n{dev}\n\nYuna:\n{review}\n\nCodex 결과물을 실행하고 검수하기 위한 환경 전제, 실행 명령, 샘플 데이터, 실패 시 확인할 점을 정리해줘.",
+        request,
+        performance,
+    )
+    redteam = run_role_task(
+        client,
+        "redteam",
+        "Red Team / 위험 지적",
+        jason_role,
+        f"원 요청:\n{request}\n\n현재 산출물:\n{brief}\n\n{design}\n\n{dev}\n\n{review}\n\n과장된 기능, 실패 가능성, 구현 난이도, 비즈니스 리스크만 지적해줘.",
+        request,
+        performance,
+    )
+    security = run_role_task(
+        client,
+        "security",
+        "Security / 개인정보",
+        sana_role,
+        f"원 요청:\n{request}\n\n제품/기술 초안:\n{design}\n\n{dev}\n\n카메라, 이미지, 위치, 크레딧, 개인정보, API 키, 공개 배포 보안 위험을 점검해줘.",
+        request,
+        performance,
+    )
+    editor = run_role_task(
+        client,
+        "editor",
+        "Prompt Editor / 문장 정리",
+        iris_role,
+        f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\nNora:\n{scope}\n\nDana:\n{dx}\n\nJason:\n{redteam}\n\nSana:\n{security}\n\nCodex가 오해할 표현을 줄이고 최종 프롬프트에 넣을 구조를 정리해줘.",
+        request,
+        performance,
+    )
+    judge = run_role_task(
+        client,
+        "judge",
+        "Validation / 품질 평가",
+        vera_role,
+        f"원 요청:\n{request}\n\n전체 검토:\nMike={brief}\n\nMina={design}\n\nJay={dev}\n\nYuna={review}\n\nNora={scope}\n\nDana={dx}\n\nJason={redteam}\n\nSana={security}\n\nIris={editor}\n\n품질 점수, blocking issue, 수정 필요 항목을 평가해줘.",
+        request,
+        performance,
+    )
     final_prompt_input = (
-        f"원 요청:\n{request}\n\nPM/기획 Mike:\n{brief}\n\n구조 정리 Mina:\n{design}\n\nDev/구현안 Jay:\n{dev}\n\nQA/비판 Yuna:\n{review}\n\n"
-        "이 내용을 하나의 Codex용 최종 프롬프트로 압축해줘. 설명문이 아니라, 바로 붙여넣어 실행할 지시문이어야 한다."
+        f"원 요청:\n{request}\n\nPM/기획 Mike:\n{brief}\n\n구조 정리 Mina:\n{design}\n\nDev/구현안 Jay:\n{dev}\n\n"
+        f"QA/비판 Yuna:\n{review}\n\nScope Nora:\n{scope}\n\nDX Dana:\n{dx}\n\nRed Team Jason:\n{redteam}\n\n"
+        f"Security Sana:\n{security}\n\nPrompt Editor Iris:\n{editor}\n\nValidation Vera:\n{judge}\n\n"
+        "이 내용을 하나의 Codex용 최종 프롬프트로 재구성해줘. 설명문이 아니라, 바로 붙여넣어 실행할 지시문이어야 한다. "
+        "Codex가 실제 MVP를 구현하고, 구현 후 자동 검증과 수동 검수 보고까지 하도록 지시해."
     )
     try:
         final, final_route = ask_final_editor(client, final_role, final_prompt_input, important)
@@ -1062,18 +1166,40 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
 
     artifacts = {
         "brief": brief,
-        "plan": brief,
+        "plan": scope,
         "design": design,
         "dev": dev,
-        "review": review,
+        "review": "\n\n".join(
+            [
+                "## Yuna QA\n" + review,
+                "## Jason Red Team\n" + redteam,
+                "## Sana Security\n" + security,
+                "## Vera Validation\n" + judge,
+            ]
+        ),
         "final": final,
         "hr": hr,
     }
+    files = [
+        {"path": "generated_prompt/codex_prompt.md", "content": final},
+        {"path": "generated_prompt/pm_brief.md", "content": brief},
+        {"path": "generated_prompt/scope.md", "content": scope},
+        {"path": "generated_prompt/ux_structure.md", "content": design},
+        {"path": "generated_prompt/implementation_plan.md", "content": dev},
+        {"path": "generated_prompt/dx_runbook.md", "content": dx},
+        {"path": "generated_prompt/risk_notes.md", "content": redteam},
+        {"path": "generated_prompt/security_notes.md", "content": security},
+        {"path": "generated_prompt/prompt_editor_notes.md", "content": editor},
+        {"path": "generated_prompt/quality_score.md", "content": judge},
+    ]
     models = (
         f"Mike={mike_provider}/{mike_model}, Mina={mina_provider}/{mina_model}, Jay={jay_provider}/{jay_model}, "
-        f"Yuna={yuna_provider}/{yuna_model}, Finalizer={final_route}"
+        f"Yuna={yuna_provider}/{yuna_model}, Nora={get_agent_provider('nora')}/{get_agent_model('nora')}, "
+        f"Dana={get_agent_provider('dana')}/{get_agent_model('dana')}, Jason={get_agent_provider('jason')}/{get_agent_model('jason')}, "
+        f"Sana={get_agent_provider('sana')}/{get_agent_model('sana')}, Iris={get_agent_provider('iris')}/{get_agent_model('iris')}, "
+        f"Vera={get_agent_provider('vera')}/{get_agent_model('vera')}, Finalizer={final_route}"
     )
-    return artifacts, [], len(performance), models
+    return artifacts, files, len(performance), models
 
 
 def get_agent_config() -> dict:
@@ -1088,7 +1214,23 @@ def get_agent_config() -> dict:
     return {
         "ok": True,
         "mode": get_pipeline_mode(),
-        "important_markers": ["중요", "신중", "퀄리티", "프로덕션", "배포", "보안", "결제", "Swift", "macOS", "iOS"],
+        "important_markers": [
+            "중요",
+            "신중",
+            "제대로",
+            "퀄리티",
+            "MVP",
+            "비즈니스 모델",
+            "플랫폼",
+            "확장성",
+            "프로덕션",
+            "배포",
+            "보안",
+            "결제",
+            "Swift",
+            "macOS",
+            "iOS",
+        ],
         "finalizer": {
             "normal": [
                 f"gemini/{os.getenv('FINAL_MODEL', 'gemini-2.0-flash')}",
