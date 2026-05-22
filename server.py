@@ -117,6 +117,7 @@ def get_pipeline_mode() -> str:
 
 def is_important_request(request: str) -> bool:
     lowered = request.lower()
+    line_count = len([line for line in request.splitlines() if line.strip()])
     markers = (
         "중요",
         "진짜 중요한",
@@ -154,7 +155,7 @@ def is_important_request(request: str) -> bool:
         "security",
         "payment",
     )
-    return len(request.strip()) >= 500 or any(marker in lowered for marker in markers)
+    return line_count >= 50 or len(request.strip()) >= 500 or any(marker in lowered for marker in markers)
 
 
 def require_openai_client():
@@ -462,32 +463,60 @@ def run_role_task(
     return emergency_role_output(role_label, request, failures)
 
 
+def contribution_score(item: dict[str, str]) -> int:
+    if item["status"] == "결근":
+        return 0
+    if item["status"] == "비상 운영":
+        return 35
+    if item["status"] == "대체 성공":
+        return 82
+    if item["role"] == "Final Editor":
+        return 92 if item["status"] == "정상 납품" else 55
+    return 88
+
+
 def build_hr_report(performance: list[dict[str, str]], final_route: str) -> str:
     absences = [item for item in performance if item["status"] == "결근"]
     backups = [item for item in performance if item["status"] == "대체 성공"]
     emergencies = [item for item in performance if item["status"] == "비상 운영"]
-    score = max(0, 100 - len(absences) * 8 - len(emergencies) * 20 + len(backups) * 2)
+    scored = [(item, contribution_score(item)) for item in performance]
+    score = round(sum(value for _, value in scored) / max(1, len(scored)))
 
     lines = [
-        "# 인사평가 및 결근 처리",
+        "# 인사평가 및 기여도 평가",
         "",
-        f"- 회사 운영 점수: {min(score, 100)}/100",
+        f"- 회사 협업 점수: {min(score, 100)}/100",
         f"- Finalizer 라우트: {final_route}",
         f"- 결근 처리: {len(absences)}건",
         f"- 대체 투입 성공: {len(backups)}건",
         f"- 비상 운영: {len(emergencies)}건",
+        "- 평가 기준: 산출물 기여도, 역할 적합성, 대체 투입 여부, 결근/비상 운영 여부",
         "",
-        "## 직원별 업무 기록",
+        "## 직원별 기여도",
         "",
     ]
-    for item in performance:
-        lines.append(f"- {item['role']} / {item['agent']} / {item['route']} / {item['status']}: {item['note']}")
+    for item, value in scored:
+        if value >= 90:
+            grade = "A"
+        elif value >= 80:
+            grade = "B"
+        elif value >= 60:
+            grade = "C"
+        elif value > 0:
+            grade = "D"
+        else:
+            grade = "F"
+        lines.append(
+            f"- {item['role']} / {item['agent']} / {item['route']} / {item['status']} / 기여도 {value}/100 ({grade}): {item['note']}"
+        )
 
     lines.extend(
         [
             "",
             "## 운영 원칙",
             "",
+            "- 이 회사의 목적은 빠른 답변이 아니라 초보자가 Codex/Claude Code에 넣을 좋은 프롬프트를 배우고 얻는 것이다.",
+            "- 약한 로컬 모델들도 역할을 쪼개 협업하면 더 좋은 작업지시서를 만들 수 있다는 전제로 운영한다.",
             "- 한 명이 결근해도 다음 담당자가 업무를 이어받는다.",
             "- 외부 API가 실패해도 로컬 모델 또는 비상 산출물로 최소 결과를 만든다.",
             "- 반복 결근 모델은 기본 라우팅에서 제외하거나 낮은 우선순위로 내린다.",
@@ -1220,6 +1249,7 @@ def get_agent_config() -> dict:
             "제대로",
             "퀄리티",
             "MVP",
+            "50줄 이상",
             "비즈니스 모델",
             "플랫폼",
             "확장성",

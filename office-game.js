@@ -602,15 +602,23 @@ function createSimulationArtifacts(request) {
       "`python3 server.py`로 열면 실제 AI가 Codex용 프롬프트 패키지를 만든다.",
     ].join("\n"),
     hr: [
-      "# 인사평가 및 결근 처리",
+      "# 인사평가 및 기여도 평가",
       "",
-      "- 회사 운영 점수: 94/100",
+      "- 회사 협업 점수: 94/100",
       "- 결근 처리: 0건",
       "- 대체 투입 성공: 0건",
       "- Finalizer 라우트: simulation/github-pages",
       "",
+      "## 직원별 기여도",
+      "",
+      "- Mike / PM / 기여도 90/100: 요청을 Codex 작업 범위로 정리",
+      "- Jay / Dev / 기여도 88/100: 구현 지시와 테스트 기준 작성",
+      "- Jason / Red Team / 기여도 86/100: 실패 가능성 지적",
+      "- Vera / Validation / 기여도 88/100: 품질 점수 산정",
+      "",
       "## 운영 원칙",
       "",
+      "- 이 회사의 목적은 초보자가 Codex/Claude Code에 넣을 좋은 프롬프트를 배우고 얻는 것이다.",
       "- 한 명이 결근해도 다음 담당자가 업무를 이어받는다.",
       "- 외부 API가 실패해도 로컬 모델 또는 비상 산출물로 최소 결과를 만든다.",
       "- Codex 부대표는 직원 산출물을 보고 실제 코드 작성과 검증을 맡는다.",
@@ -638,8 +646,8 @@ function renderArtifact() {
   });
 }
 
-function setScoreBoard(score, label = "SCORE") {
-  const value = typeof score === "number" ? `${score}/100` : "--";
+function setScoreBoard(score, label = "VERA") {
+  const value = typeof score === "number" ? `${score}/100` : "대기";
   els.scoreBoard.innerHTML = `${label}<br><strong>${value}</strong>`;
 }
 
@@ -659,7 +667,7 @@ function updateScoreFromResult(result, fallbackArtifacts = {}) {
     return;
   }
   const parsed = parseScoreFromText([fallbackArtifacts.review, fallbackArtifacts.final, fallbackArtifacts.dev].join("\n"));
-  setScoreBoard(parsed, parsed === null ? "SCORE" : "VERA");
+  setScoreBoard(parsed, "VERA");
 }
 
 function toggleArtifactPanel(forceOpen) {

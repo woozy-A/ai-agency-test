@@ -92,6 +92,7 @@ class ProjectRoutingTest(unittest.TestCase):
         self.assertTrue(is_important_request("신중하게 SwiftUI macOS 앱 프롬프트를 만들어줘"))
         self.assertTrue(is_important_request("인류의 최대 난제인 점심 메뉴 추천 앱을 신중하게 만들어줘"))
         self.assertTrue(is_important_request("Object Detection과 CoreML을 쓰는 B2B 플랫폼 MVP를 제대로 설계해줘"))
+        self.assertTrue(is_important_request("\n".join(f"아이디어 {index}" for index in range(50))))
         self.assertFalse(is_important_request("간단한 투두 앱 프롬프트 만들어줘"))
 
     def test_default_pipeline_mode_is_multi(self):
@@ -201,6 +202,7 @@ class ProjectRoutingTest(unittest.TestCase):
         self.assertGreaterEqual(calls, 10)
         self.assertIn("Jason Red Team", artifacts["review"])
         self.assertIn("Sana Security", artifacts["review"])
+        self.assertIn("기여도", artifacts["hr"])
         self.assertTrue(any(item["path"] == "generated_prompt/codex_prompt.md" for item in files))
         self.assertIn("Nora=", models)
 
