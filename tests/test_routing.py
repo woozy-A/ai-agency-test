@@ -93,7 +93,7 @@ class ProjectRoutingTest(unittest.TestCase):
         config = get_agent_config()
         self.assertIn("agents", config)
         self.assertIn("finalizer", config)
-        self.assertIn("gemini/gemini-2.5-flash", config["finalizer"]["important"])
+        self.assertIn("gemini/gemini-3.5-flash", config["finalizer"]["important"])
         self.assertIn("ollama/qwen3:14b", config["finalizer"]["normal"])
 
     def test_normal_finalizer_skips_director_model(self):
@@ -107,7 +107,7 @@ class ProjectRoutingTest(unittest.TestCase):
             answer, route = ask_final_editor(None, "role", "prompt", important=False)
 
         self.assertEqual(answer, "final")
-        self.assertNotIn("gemini-2.5-flash", route)
+        self.assertNotIn("gemini-3.5-flash", route)
         self.assertEqual(calls[0], ("gemini-2.0-flash", "gemini"))
 
     def test_important_finalizer_falls_back_to_local_model(self):
@@ -126,12 +126,12 @@ class ProjectRoutingTest(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                ("gemini-2.5-flash", "gemini"),
+                ("gemini-3.5-flash", "gemini"),
                 ("gemini-2.0-flash", "gemini"),
                 ("qwen3:14b", "ollama"),
             ],
         )
-        self.assertEqual(route, "gemini/gemini-2.5-flash -> gemini/gemini-2.0-flash -> ollama/qwen3:14b")
+        self.assertEqual(route, "gemini/gemini-3.5-flash -> gemini/gemini-2.0-flash -> ollama/qwen3:14b")
 
     def test_role_absence_uses_backup_agent(self):
         performance = []

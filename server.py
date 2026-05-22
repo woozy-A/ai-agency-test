@@ -327,7 +327,7 @@ def ask_final_editor(client, role_prompt: str, user_prompt: str, important: bool
     fallback_model = os.getenv("FINAL_LOCAL_MODEL", "qwen3:14b")
     normal_models = [os.getenv("FINAL_MODEL", "gemini-2.0-flash")]
     important_models = [
-        os.getenv("FINAL_DIRECTOR_MODEL", "gemini-2.5-flash"),
+        os.getenv("FINAL_DIRECTOR_MODEL", "gemini-3.5-flash"),
         os.getenv("FINAL_MODEL", "gemini-2.0-flash"),
     ]
     chain = [("gemini", model) for model in (important_models if important else normal_models)]
@@ -1154,7 +1154,7 @@ def get_agent_config() -> dict:
                 f"ollama/{os.getenv('FINAL_LOCAL_MODEL', 'qwen3:14b')}",
             ],
             "important": [
-                f"gemini/{os.getenv('FINAL_DIRECTOR_MODEL', 'gemini-2.5-flash')}",
+                f"gemini/{os.getenv('FINAL_DIRECTOR_MODEL', 'gemini-3.5-flash')}",
                 f"gemini/{os.getenv('FINAL_MODEL', 'gemini-2.0-flash')}",
                 f"ollama/{os.getenv('FINAL_LOCAL_MODEL', 'qwen3:14b')}",
             ],

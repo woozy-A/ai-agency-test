@@ -53,7 +53,7 @@ const defaultAgentConfig = {
   mode: "demo",
   finalizer: {
     normal: ["gemini/gemini-2.0-flash", "ollama/qwen3:14b"],
-    important: ["gemini/gemini-2.5-flash", "gemini/gemini-2.0-flash", "ollama/qwen3:14b"],
+    important: ["gemini/gemini-3.5-flash", "gemini/gemini-2.0-flash", "ollama/qwen3:14b"],
   },
   agents: {
     mike: { provider: "ollama", model: "qwen3:14b", kind: "Local" },
@@ -199,7 +199,7 @@ function renderModelConfig() {
 
   if (!els.modelRouting) return;
   const normal = agentConfig.finalizer?.normal?.join(" -> ") || "gemini/gemini-2.0-flash -> ollama/qwen3:14b";
-  const important = agentConfig.finalizer?.important?.join(" -> ") || "gemini/gemini-2.5-flash -> gemini/gemini-2.0-flash -> ollama/qwen3:14b";
+  const important = agentConfig.finalizer?.important?.join(" -> ") || "gemini/gemini-3.5-flash -> gemini/gemini-2.0-flash -> ollama/qwen3:14b";
   els.modelRouting.innerHTML = `
     <strong>Model Routing</strong>
     <p>Pipeline: ${agentConfig.mode || "multi"}</p>
