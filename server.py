@@ -797,6 +797,47 @@ def run_artifact_review(agent_key: str, artifact_name: str, artifact: str, instr
     }
 
 
+def build_rework_prompt(original_request: str, result: str, extra_context: str, reviews: dict[str, str]) -> str:
+    review_text = "\n\n".join(f"## {name}\n{content}" for name, content in reviews.items())
+    return f"""# Codex 재작업 지시서
+
+## 원래 요청
+{original_request or "원래 요청이 제공되지 않았습니다. 아래 결과물과 문제 상황을 기준으로 재작업한다."}
+
+## 현재 결과물 / 에러 / 관찰 내용
+{result}
+
+## 추가 맥락
+{extra_context or "추가 맥락 없음"}
+
+## 직원 재검토 요약
+{review_text}
+
+## 재작업 목표
+현재 결과물을 처음부터 갈아엎기보다, 문제를 일으키는 부분을 좁게 수정한다. 기존에 잘 동작하는 기능과 스타일은 유지한다.
+
+## 수정 지시
+- 재현 가능한 문제를 먼저 요약한다.
+- 수정 전 성공 기준 체크리스트를 작성한다.
+- 필요한 파일만 수정한다.
+- 메뉴/상태/검증 로직처럼 데이터 무결성이 중요한 부분은 테스트 가능한 구조로 정리한다.
+- UI 문제라면 데스크톱과 모바일에서 텍스트 겹침, 버튼 비활성 상태, 빈 상태를 확인한다.
+- 에러 로그가 있다면 원인 후보와 실제 수정 근거를 분리해서 설명한다.
+
+## 검증 기준
+- 자동으로 확인 가능한 것은 테스트나 스크립트로 검증한다.
+- 브라우저 확인이 필요한 것은 직접 검수 시나리오를 제공한다.
+- 수정 후 결과 보고는 반드시 아래 형식을 따른다.
+
+## 완료 보고 형식
+- 변경 파일
+- 자동 검증 완료 항목
+- 검수 필요 항목
+- 위험한 항목
+- 실행 방법
+"""
+
+
 def slugify(text: str) -> str:
     slug = re.sub(r"[^0-9A-Za-z가-힣]+", "-", text).strip("-")
     return slug[:40] or "request"
@@ -820,6 +861,60 @@ def save_run(request: str, artifacts: dict[str, str], files: list[dict[str, str]
         file_path.write_text(item["content"], encoding="utf-8")
 
     return output_dir
+
+
+def run_rework_pipeline(original_request: str, result: str, extra_context: str = "") -> dict:
+    if not result.strip():
+        raise RuntimeError("재작업할 결과물이나 에러 내용을 입력해주세요.")
+
+    review_targets = [
+        ("Jay", "jay", "구현 지시와 코드 구조 관점에서 수정해야 할 점을 찾아줘."),
+        ("Dana", "dana", "실행 방법, 재현 절차, 로컬 환경 문제를 찾아줘."),
+        ("Yuna", "yuna", "성공 기준과 테스트 누락을 찾아줘."),
+        ("Jason", "jason", "위험한 허점과 실패 가능성만 지적해줘."),
+        ("Sana", "sana", "보안, 비밀값, 공개 저장소 위험만 점검해줘."),
+        ("Vera", "vera", "수정 우선순위와 품질 점수를 매겨줘."),
+    ]
+    reviews = {}
+    performance = []
+    calls = 0
+    artifact = f"원래 요청:\n{original_request}\n\n현재 결과물/에러:\n{result}\n\n추가 맥락:\n{extra_context}"
+
+    for label, agent_key, instruction in review_targets:
+        try:
+            response = run_artifact_review(agent_key, "codex_result", artifact, instruction)
+            reviews[label] = response["answer"]
+            performance.append(f"- {label}: {response['provider']}/{response['model']} 검토 완료")
+            calls += 1
+        except Exception as exc:
+            reviews[label] = f"검토 실패: {role_absence_summary(exc)}"
+            performance.append(f"- {label}: 검토 실패, 다른 검토 결과로 재작업 지시서 생성")
+
+    rework_prompt = build_rework_prompt(original_request, result, extra_context, reviews)
+    artifacts = {
+        "brief": "Codex가 만든 결과물 또는 에러를 기반으로 재작업 지시서를 생성했습니다.",
+        "plan": "1. 결과물/에러 수집\n2. 역할별 재검토\n3. 수정 우선순위 정리\n4. Codex용 재작업 프롬프트 생성",
+        "design": reviews.get("Dana", ""),
+        "dev": reviews.get("Jay", ""),
+        "review": "\n\n".join(reviews.values()),
+        "final": rework_prompt,
+        "hr": "# Rework 인사평가\n\n" + "\n".join(performance),
+    }
+    files = [
+        {"path": "generated_prompt/rework_prompt.md", "content": rework_prompt},
+        {"path": "generated_prompt/rework_reviews.md", "content": artifacts["review"]},
+    ]
+    output_dir = save_run("rework-" + (original_request or "codex-result"), artifacts, files)
+    return {
+        "ok": True,
+        "mode": "rework",
+        "provider": get_provider(),
+        "model": "Rework=Jay+Dana+Yuna+Jason+Sana+Vera",
+        "calls": calls,
+        "output_dir": str(output_dir),
+        "files": [item["path"] for item in files],
+        "artifacts": artifacts,
+    }
 
 
 def extract_quality_score(files: list[dict[str, str]], artifacts: dict[str, str]) -> dict | None:
@@ -1125,7 +1220,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path not in ("/api/run", "/api/agent-chat", "/api/review-artifact"):
+        if path not in ("/api/run", "/api/agent-chat", "/api/review-artifact", "/api/rework"):
             self.send_json(404, {"ok": False, "error": "Not found"})
             return
 
@@ -1147,6 +1242,13 @@ class Handler(SimpleHTTPRequestHandler):
                 artifact = str(payload.get("artifact", "")).strip()
                 instruction = str(payload.get("instruction", "")).strip()
                 result = run_artifact_review(agent, artifact_name, artifact, instruction)
+                self.send_json(200, result)
+                return
+            if path == "/api/rework":
+                original_request = str(payload.get("original_request", "")).strip()
+                result_text = str(payload.get("result", "")).strip()
+                extra_context = str(payload.get("extra_context", "")).strip()
+                result = run_rework_pipeline(original_request, result_text, extra_context)
                 self.send_json(200, result)
                 return
 

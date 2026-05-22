@@ -13,6 +13,7 @@ from server import (
     is_lunch_menu_request,
     normalize_artifacts,
     project_file_contract,
+    run_rework_pipeline,
     run_lunch_menu_fast_lane,
     review_focus_for,
     run_role_task,
@@ -175,6 +176,28 @@ class ProjectRoutingTest(unittest.TestCase):
         self.assertIn("100개 이상", artifacts["final"])
         self.assertIn("재선택 3번", artifacts["final"])
         self.assertTrue(any(item["path"] == "generated_prompt/codex_prompt.md" for item in files))
+
+    def test_rework_pipeline_generates_rework_prompt(self):
+        def fake_review(agent_key, artifact_name, artifact, instruction):
+            return {
+                "ok": True,
+                "agent": agent_key,
+                "name": agent_key,
+                "role": "test",
+                "provider": "ollama",
+                "model": "fake",
+                "artifact": artifact_name,
+                "focus": "test",
+                "answer": f"{agent_key} reviewed {instruction}",
+            }
+
+        with patch("server.run_artifact_review", side_effect=fake_review):
+            result = run_rework_pipeline("점심 앱", "재선택이 4번 됩니다.", "브라우저 확인")
+
+        self.assertEqual(result["mode"], "rework")
+        self.assertIn("generated_prompt/rework_prompt.md", result["files"])
+        self.assertIn("Codex 재작업 지시서", result["artifacts"]["final"])
+        self.assertIn("재선택이 4번 됩니다.", result["artifacts"]["final"])
 
 
 if __name__ == "__main__":

@@ -116,9 +116,34 @@ textarea {
 
 .button-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
   margin: 12px 0 18px;
+}
+
+.rework-panel {
+  margin-top: 12px;
+  border: 3px solid var(--panel-line);
+  background: #f6efd4;
+}
+
+.rework-panel summary {
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.rework-panel label {
+  margin: 8px 10px;
+}
+
+.rework-panel textarea {
+  min-height: 120px;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
 }
 
 button {

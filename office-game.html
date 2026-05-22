@@ -18,8 +18,15 @@
           <label for="requestInput">창우 사장의 과제</label>
           <textarea id="requestInput" rows="7">SwiftUI로 macOS용 지뢰찾기 게임을 만들고 싶어. Codex에 넣을 좋은 작업 프롬프트를 만들어줘.</textarea>
 
+          <details class="rework-panel">
+            <summary>Rework Mode</summary>
+            <label for="reworkInput">Codex 결과물 / 에러 / 수정 요청</label>
+            <textarea id="reworkInput" rows="5" placeholder="Codex가 만든 결과물, 에러 로그, 아쉬운 점을 붙여넣으세요."></textarea>
+          </details>
+
           <div class="button-row">
             <button id="startButton" type="button">Start</button>
+            <button id="reworkButton" class="secondary" type="button">Rework</button>
             <button id="resetButton" class="secondary" type="button">Reset</button>
           </div>
 

@@ -89,7 +89,9 @@ const CHAT_HISTORY_KEY = "changwooPromptAgency.agentChatHistory";
 
 const els = {
   requestInput: document.querySelector("#requestInput"),
+  reworkInput: document.querySelector("#reworkInput"),
   startButton: document.querySelector("#startButton"),
+  reworkButton: document.querySelector("#reworkButton"),
   resetButton: document.querySelector("#resetButton"),
   statusText: document.querySelector("#statusText"),
   taskText: document.querySelector("#taskText"),
@@ -614,6 +616,30 @@ async function reviewArtifact(agentKey, instruction) {
   return payload;
 }
 
+async function runReworkRequest(originalRequest, result, extraContext) {
+  const heartbeat = startBackendHeartbeat("Rework mode");
+  try {
+    const response = await fetch("/api/rework", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        original_request: originalRequest,
+        result,
+        extra_context: extraContext,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || "Rework request failed");
+    }
+    return payload;
+  } finally {
+    window.clearInterval(heartbeat);
+  }
+}
+
 function showPaper(key) {
   if (els.papers[key]) els.papers[key].classList.add("visible");
 }
@@ -639,6 +665,7 @@ function resetOffice() {
   updateArtifactCount();
   renderArtifact();
   els.startButton.disabled = false;
+  els.reworkButton.disabled = false;
 }
 
 async function sendEveryoneHome() {
@@ -804,6 +831,88 @@ async function runOffice() {
   els.startButton.disabled = false;
 }
 
+async function runReworkMode() {
+  if (running) return;
+  const result = els.reworkInput.value.trim();
+  if (!result) {
+    els.reworkInput.focus();
+    setTask("Rework", "Paste Codex result or error first");
+    return;
+  }
+
+  running = true;
+  els.startButton.disabled = true;
+  els.reworkButton.disabled = true;
+  logs = [];
+  artifacts = { log: "" };
+  pendingArtifacts = {};
+  activeArtifact = "log";
+  renderArtifact();
+  Object.values(els.papers).forEach((paper) => paper.classList.remove("visible"));
+  els.deliveryBox.classList.remove("complete");
+
+  const originalRequest = els.requestInput.value.trim();
+  addLog("창우가 Codex 결과물을 Rework Desk에 제출했습니다.");
+  showPaper("request");
+  await say("changwoo", "이 결과물 다시 검사해서 수정 지시서로 만들어줘.", 1400);
+  await Promise.all([
+    moveAgentPath("jay", [positions.hallway.center, positions.jay.review], "Jay is checking implementation"),
+    moveAgentPath("dana", [positions.hallway.lower, positions.dana.review], "Dana is checking execution"),
+    moveAgentPath("jason", [positions.jason.meeting, positions.jason.review], "Jason is red-teaming result"),
+  ]);
+
+  try {
+    const payload = shouldUseBackend()
+      ? await runReworkRequest(originalRequest, result, "브라우저 Rework Mode에서 제출됨")
+      : {
+          mode: "rework-demo",
+          model: "simulation/rework",
+          calls: 0,
+          output_dir: "GitHub Pages demo",
+          files: ["generated_prompt/rework_prompt.md"],
+          artifacts: {
+            brief: "공개 링크에서는 Rework 데모만 표시됩니다.",
+            plan: "로컬 서버에서 실제 모델이 결과물을 재검토합니다.",
+            design: "Dana가 실행 흐름을 확인합니다.",
+            dev: "Jay가 구현 수정 지시를 작성합니다.",
+            review: "Jason/Sana/Vera가 위험과 점수를 확인합니다.",
+            final: `# Codex 재작업 지시서\n\n## 현재 결과물\n${result}\n\n## 수정 지시\n로컬 서버에서 실제 Rework Mode를 실행하면 역할별 검토가 반영됩니다.`,
+            hr: "# Rework Demo\n\n- 공개 링크 데모 모드",
+          },
+        };
+    pendingArtifacts = payload.artifacts;
+    artifacts.brief = pendingArtifacts.brief;
+    artifacts.plan = pendingArtifacts.plan;
+    artifacts.design = pendingArtifacts.design;
+    artifacts.dev = pendingArtifacts.dev;
+    artifacts.review = pendingArtifacts.review;
+    artifacts.final = pendingArtifacts.final;
+    artifacts.hr = pendingArtifacts.hr;
+    addLog(`Rework completed with ${payload.model}`);
+    addLog(`실제 API 호출 수: ${payload.calls || 0}`);
+    addLog(`결과 저장 위치: ${payload.output_dir}`);
+    if (payload.files?.length) addLog(`생성 프롬프트: ${payload.files.join(", ")}`);
+    showPaper("draft");
+    showPaper("final");
+    els.deliveryBox.classList.add("complete");
+    await Promise.all([say("jay", "수정 지시서 만들었습니다.", 1100), say("jason", "위험 지점도 표시했습니다.", 1100)]);
+    activeArtifact = "final";
+    renderArtifact();
+    toggleArtifactPanel(true);
+    setTask("Done", "Rework prompt is ready");
+  } catch (error) {
+    artifacts.log = logs.concat([`ERROR. ${error.message}`]).join("\n");
+    activeArtifact = "log";
+    renderArtifact();
+    setTask("Error", "Rework needs attention");
+    await say("dana", "재작업 입력이나 서버 상태를 확인해야 해요.", 1400);
+  } finally {
+    running = false;
+    els.startButton.disabled = false;
+    els.reworkButton.disabled = false;
+  }
+}
+
 els.tabs.forEach((tab) => {
   tab.addEventListener("click", () => {
     activeArtifact = tab.dataset.artifact;
@@ -885,6 +994,7 @@ els.exportChatButton.addEventListener("click", exportChatHistory);
 els.clearChatButton.addEventListener("click", clearChatHistory);
 els.artifactToggle.addEventListener("click", () => toggleArtifactPanel());
 els.startButton.addEventListener("click", runOffice);
+els.reworkButton.addEventListener("click", runReworkMode);
 els.resetButton.addEventListener("click", resetOffice);
 
 resetOffice();
