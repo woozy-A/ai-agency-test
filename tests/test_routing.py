@@ -204,6 +204,8 @@ class ProjectRoutingTest(unittest.TestCase):
         self.assertIn("Sana Security", artifacts["review"])
         self.assertIn("기여도", artifacts["hr"])
         self.assertTrue(any(item["path"] == "generated_prompt/codex_prompt.md" for item in files))
+        self.assertTrue(any(item["path"] == "generated_prompt/design_recommendations.md" for item in files))
+        self.assertTrue(any(item["path"] == "generated_prompt/why_this_prompt_works.md" for item in files))
         self.assertIn("Nora=", models)
 
     def test_rework_pipeline_generates_rework_prompt(self):

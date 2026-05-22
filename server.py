@@ -923,6 +923,36 @@ def extract_quality_score(files: list[dict[str, str]], artifacts: dict[str, str]
     return None
 
 
+PROMPT_COMPANY_PRINCIPLES = """
+Changwoo Prompt Agency의 차별점:
+- GPT보다 똑똑한 척하지 않는다. 차별점은 지능이 아니라 구조화와 누락 방지다.
+- AI 초보자가 빠뜨리기 쉬운 디자인, 상태, 파일 구조, 테스트, 보안, 검수 기준을 역할별로 강제 점검한다.
+- Codex/Claude Code가 실제 MVP를 구현하도록 충분히 구체적인 작업지시서를 만든다.
+- 결과물은 단순 프롬프트가 아니라 학습 가능한 작업지시서 패키지여야 한다.
+""".strip()
+
+
+REQUIRED_CODEX_PROMPT_SECTIONS = [
+    "원 요청",
+    "목표",
+    "MVP 범위",
+    "하지 않을 일",
+    "디자인 권장사항",
+    "화면/상태 설계",
+    "파일 구조",
+    "구현 지시",
+    "자동 테스트",
+    "직접 검수 시나리오",
+    "보안/개인정보 주의사항",
+    "위험 항목",
+    "완료 보고 형식",
+]
+
+
+def required_prompt_sections_text() -> str:
+    return "\n".join(f"- {section}" for section in REQUIRED_CODEX_PROMPT_SECTIONS)
+
+
 def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
     project_type = detect_project_type(request)
     role_prompt = (
@@ -1006,8 +1036,9 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         "답변은 한국어로 쓰고 Codex가 이어받기 쉽게 구체적으로 쓴다."
     )
     mina_role = (
-        "너는 Changwoo Prompt Agency의 기획 보조 Mina다. Mike의 범위를 보고 사용자 흐름, 화면/파일 구조, "
-        "산출물 형태를 정리한다. 초보자가 프롬프트 작성법을 배울 수 있도록 왜 이 구조가 필요한지도 짧게 남긴다."
+        "너는 Changwoo Prompt Agency의 UX/Design 담당 Mina다. Mike의 범위를 보고 사용자 흐름, 화면 구조, "
+        "디자인 톤, 레이아웃, 컬러/타이포 방향, 빈 상태, 로딩 상태, 오류 상태, 성공 상태, 모바일/데스크톱 반응형을 정리한다. "
+        "초보자가 프롬프트 작성법을 배울 수 있도록 왜 이 디자인 지시가 필요한지도 짧게 남긴다."
     )
     jay_role = (
         "너는 Changwoo Prompt Agency의 Dev/구현안 Jay다. Mike와 Mina의 내용을 바탕으로 Codex가 수정할 "
@@ -1036,18 +1067,19 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
     )
     iris_role = (
         "너는 Prompt Editor Iris다. 앞 단계 결과를 Codex가 오해하지 않는 문장으로 정리한다. "
-        "모호한 표현을 지우고 산출물 형식, 구현 순서, 완료 보고 형식을 선명하게 만든다."
+        "모호한 표현을 지우고 산출물 형식, 구현 순서, 완료 보고 형식을 선명하게 만든다. "
+        "최종 프롬프트가 왜 좋은지 초보자가 배울 수 있는 설명도 남긴다."
     )
     vera_role = (
         "너는 Validation Judge Vera다. 최종 프롬프트가 초보자에게 학습 가치가 있는지, Codex가 MVP 이상을 구현할 만큼 "
-        "충분히 구체적인지 100점 만점으로 평가하고 blocking issue를 표시한다."
+        "충분히 구체적인지 100점 만점으로 평가하고 blocking issue를 표시한다. "
+        "필수 섹션 누락 여부, 디자인 지시 누락, 테스트 누락, 보안 누락, 실행 방법 누락을 체크리스트로 평가한다."
     )
     final_role = (
         "너는 Final Editor다. 앞 단계 산출물을 단순 요약하지 말고, 창우가 Codex에 그대로 붙여넣으면 "
         "MVP 수준의 실제 결과물이 나오도록 최종 프롬프트로 재구성한다. "
         "빠른 답보다 정확하고 검증 가능한 작업지시서를 우선한다. "
-        "반드시 다음 섹션을 포함한다: 목표, MVP 범위, 구현 지시, 파일 구조, 자동 테스트, 직접 검수 시나리오, "
-        "보안/개인정보 주의사항, 위험 항목, 완료 보고 형식."
+        "필수 섹션을 빠뜨리면 실패다."
     )
 
     mike_provider = get_agent_provider("mike")
@@ -1073,9 +1105,11 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
     design = run_role_task(
         client,
         "structure",
-        "기획 보조 / 구조",
+        "UX Design / 화면 설계",
         mina_role,
-        f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\nCodex 프롬프트에 들어갈 사용자 흐름, 화면/파일 구조, 산출물 형태를 제안해줘.",
+        f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\n"
+        "Codex 프롬프트에 들어갈 UX/디자인 지시를 작성해줘.\n"
+        "반드시 포함: 사용자 흐름, 첫 화면 레이아웃, 주요 컴포넌트, 디자인 톤, 빈/로딩/오류/성공 상태, 모바일/데스크톱 반응형, 접근성 기준.",
         request,
         performance,
     )
@@ -1147,16 +1181,21 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         "judge",
         "Validation / 품질 평가",
         vera_role,
-        f"원 요청:\n{request}\n\n전체 검토:\nMike={brief}\n\nMina={design}\n\nJay={dev}\n\nYuna={review}\n\nNora={scope}\n\nDana={dx}\n\nJason={redteam}\n\nSana={security}\n\nIris={editor}\n\n품질 점수, blocking issue, 수정 필요 항목을 평가해줘.",
+        f"원 요청:\n{request}\n\n필수 최종 프롬프트 섹션:\n{required_prompt_sections_text()}\n\n"
+        f"전체 검토:\nMike={brief}\n\nMina={design}\n\nJay={dev}\n\nYuna={review}\n\nNora={scope}\n\nDana={dx}\n\nJason={redteam}\n\nSana={security}\n\nIris={editor}\n\n"
+        "품질 점수, blocking issue, 수정 필요 항목, 필수 섹션별 통과/누락 여부를 평가해줘.",
         request,
         performance,
     )
     final_prompt_input = (
-        f"원 요청:\n{request}\n\nPM/기획 Mike:\n{brief}\n\n구조 정리 Mina:\n{design}\n\nDev/구현안 Jay:\n{dev}\n\n"
+        f"{PROMPT_COMPANY_PRINCIPLES}\n\n"
+        f"원 요청:\n{request}\n\n필수 최종 프롬프트 섹션:\n{required_prompt_sections_text()}\n\n"
+        f"PM/기획 Mike:\n{brief}\n\nUX/Design Mina:\n{design}\n\nDev/구현안 Jay:\n{dev}\n\n"
         f"QA/비판 Yuna:\n{review}\n\nScope Nora:\n{scope}\n\nDX Dana:\n{dx}\n\nRed Team Jason:\n{redteam}\n\n"
         f"Security Sana:\n{security}\n\nPrompt Editor Iris:\n{editor}\n\nValidation Vera:\n{judge}\n\n"
         "이 내용을 하나의 Codex용 최종 프롬프트로 재구성해줘. 설명문이 아니라, 바로 붙여넣어 실행할 지시문이어야 한다. "
-        "Codex가 실제 MVP를 구현하고, 구현 후 자동 검증과 수동 검수 보고까지 하도록 지시해."
+        "Codex가 실제 MVP를 구현하고, 구현 후 자동 검증과 수동 검수 보고까지 하도록 지시해. "
+        "디자인 권장사항과 화면/상태 설계를 반드시 포함해. 마지막에는 이 프롬프트가 좋은 이유를 짧은 체크리스트로 포함해."
     )
     try:
         final, final_route = ask_final_editor(client, final_role, final_prompt_input, important)
@@ -1166,8 +1205,9 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
             "# Codex 실행 프롬프트\n\n"
             "아래 요청을 구현 전에 성공 기준을 먼저 세우고, 구현 후 자동 검증과 직접 검수 시나리오를 보고하는 방식으로 처리해줘.\n\n"
             f"## 원 요청\n{request}\n\n"
+            f"## 필수 섹션\n{required_prompt_sections_text()}\n\n"
             f"## PM / 기획\n{brief}\n\n"
-            f"## 구조\n{design}\n\n"
+            f"## 디자인 권장사항\n{design}\n\n"
             f"## 구현안\n{dev}\n\n"
             f"## QA / 위험\n{review}\n\n"
             "## 완료 보고 형식\n"
@@ -1213,6 +1253,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         {"path": "generated_prompt/codex_prompt.md", "content": final},
         {"path": "generated_prompt/pm_brief.md", "content": brief},
         {"path": "generated_prompt/scope.md", "content": scope},
+        {"path": "generated_prompt/design_recommendations.md", "content": design},
         {"path": "generated_prompt/ux_structure.md", "content": design},
         {"path": "generated_prompt/implementation_plan.md", "content": dev},
         {"path": "generated_prompt/dx_runbook.md", "content": dx},
@@ -1220,6 +1261,7 @@ def run_multi_agent_pipeline(client, request: str) -> tuple[dict[str, str], list
         {"path": "generated_prompt/security_notes.md", "content": security},
         {"path": "generated_prompt/prompt_editor_notes.md", "content": editor},
         {"path": "generated_prompt/quality_score.md", "content": judge},
+        {"path": "generated_prompt/why_this_prompt_works.md", "content": editor},
     ]
     models = (
         f"Mike={mike_provider}/{mike_model}, Mina={mina_provider}/{mina_model}, Jay={jay_provider}/{jay_model}, "
