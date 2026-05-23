@@ -26,10 +26,24 @@
 - Confirm important requests route through `gemini-2.5-pro -> gemini-2.5-flash -> gemini-2.5-flash-lite -> gemini-2.0-flash -> ollama/qwen3:14b`.
 - Temporarily force a failing Gemini model name and confirm fallback continues instead of stopping the company.
 
+## Ollama model guard
+- Run `ollama list` before local model testing.
+- Confirm the models shown in the Team drawer exist locally, especially `qwen3:14b`, `freehuntx/qwen3-coder:14b`, `llama3.1:latest`, and `gemma4:latest`.
+- If a configured Ollama model is missing, confirm `/api/agent-config` reports `missing_models`.
+- Confirm missing local models can fall back to installed candidates such as `qwen3:14b` or `llama3.1:latest`.
+- For slow local multi-agent runs, confirm `.env` can override `PIPELINE_TIMEOUT_SECONDS` and that the default is 2400 seconds.
+
+## Prompt language policy
+- Run a normal Start request.
+- Confirm generated `codex_prompt.md` is English-first and paste-ready for Codex.
+- Confirm the final report format inside the generated prompt asks Codex to respond in Korean.
+- Confirm browser logs and status messages remain Korean-friendly for Changwoo.
+
 ## Artifact rendering
 - Run Start.
-- Confirm Log, Brief, Plan, UX, Prompt, Review, Final, and HR tabs all render.
-- Confirm artifact count is based on 8 artifacts.
+- Confirm Log, Brief, Plan, UX, Prompt, Review, Final, Files, and HR tabs all render.
+- Confirm Files tab shows generated prompt file names or file guidance.
+- Confirm artifact count is based on 9 artifacts.
 - Confirm Rework Mode writes a new Final and HR report.
 
 ## Baseline automated checks

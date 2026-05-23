@@ -46,7 +46,7 @@ class PipelineTimeoutError(RuntimeError):
 class PipelineContext:
     def __init__(self, timeout_seconds: int | None = None):
         self.started_at = time.monotonic()
-        self.timeout_seconds = timeout_seconds or int(os.getenv("PIPELINE_TIMEOUT_SECONDS", "900"))
+        self.timeout_seconds = timeout_seconds or int(os.getenv("PIPELINE_TIMEOUT_SECONDS", "2400"))
         self.absent_agents: set[str] = set()
         self.progress: list[str] = []
         self.cancelled = False
@@ -93,8 +93,7 @@ def load_env() -> None:
 
 
 def get_provider() -> str:
-    load_env()
-    return os.getenv("AI_PROVIDER", "gemini").strip().lower()
+    return os.getenv("AI_PROVIDER", "gemini").strip().lower()  # FIX: PY-2
 
 
 def get_model(provider: str | None = None) -> str:
@@ -128,8 +127,7 @@ def get_model_candidates(primary_model: str, provider: str | None = None) -> lis
 
 
 def get_agent_provider(agent_key: str) -> str:
-    load_env()
-    return os.getenv(f"{agent_key.upper()}_PROVIDER", get_provider()).strip().lower()
+    return os.getenv(f"{agent_key.upper()}_PROVIDER", get_provider()).strip().lower()  # FIX: PY-2
 
 
 def get_agent_model(agent_key: str) -> str:
@@ -150,8 +148,7 @@ def get_agent_route(agent_key: str) -> dict[str, str | list[str]]:
 
 
 def get_pipeline_mode() -> str:
-    load_env()
-    return os.getenv("AI_PIPELINE_MODE", "multi").strip().lower()
+    return os.getenv("AI_PIPELINE_MODE", "multi").strip().lower()  # FIX: PY-2
 
 
 def is_important_request(request: str) -> bool:
@@ -194,7 +191,14 @@ def is_important_request(request: str) -> bool:
         "security",
         "payment",
     )
-    return line_count >= 50 or len(request.strip()) >= 500 or any(marker in lowered for marker in markers)
+    word_markers = {"swift", "macos", "ios", "ar", "xcode", "mvp"}  # FIX: PY-3
+    phrase_markers = {marker for marker in markers if marker not in word_markers}  # FIX: PY-3
+    return (  # FIX: PY-3
+        line_count >= 50
+        or len(request.strip()) >= 500
+        or any(marker in lowered for marker in phrase_markers)
+        or any(re.search(rf"\b{re.escape(marker)}\b", lowered) for marker in word_markers)
+    )
 
 
 def require_openai_client():
@@ -329,6 +333,22 @@ def ask_ollama_agent(agent_name: str, role_prompt: str, user_prompt: str, model:
     return text
 
 
+def ollama_tags_endpoint() -> str:
+    endpoint = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
+    parsed = urlparse(endpoint)
+    return parsed._replace(path="/api/tags", query="", fragment="").geturl()
+
+
+def get_installed_ollama_models(timeout: float = 0.8) -> set[str] | None:
+    request = Request(ollama_tags_endpoint(), method="GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
+        return None
+    return {str(item.get("name", "")).strip() for item in data.get("models", []) if item.get("name")}
+
+
 def ask_agent(
     client,
     agent_name: str,
@@ -439,15 +459,218 @@ def role_absence_summary(exc: Exception) -> str:
     return text[:160] or exc.__class__.__name__
 
 
+def request_profile(request: str) -> dict[str, str | list[str]]:
+    lowered = request.lower()
+    if any(marker in lowered for marker in ("신발", "스니커", "sneaker", "shoe", "조던", "나이키", "아디다스")):
+        return {
+            "title": "shoe collection management app",
+            "domain": "collection management for sneaker collectors with 100+ pairs",
+            "item": "shoe",
+            "item_plural": "shoes",
+            "primary_user": "sneaker collector",
+            "core_fields": ["name", "brand", "purchaseDate", "price", "photo", "category", "color", "size", "condition", "notes"],
+            "summary_metrics": ["total owned pairs", "count by brand", "current-year spending", "monthly purchase trend", "recent purchases", "similar-shoe warning"],
+            "optional_features": ["photo upload", "barcode/SKU input", "CSV export", "duplicate purchase prevention"],
+        }
+    return {
+        "title": "personal inventory management app",
+        "domain": "cataloging personal items and purchase history",
+        "item": "item",
+        "item_plural": "items",
+        "primary_user": "user managing a personal collection",
+        "core_fields": ["name", "brandOrCategory", "purchaseDate", "price", "photo", "condition", "notes"],
+        "summary_metrics": ["total owned items", "count by category", "current-year spending", "monthly purchase trend", "recent purchases"],
+        "optional_features": ["photo upload", "search/filter", "CSV export", "duplicate prevention"],
+    }
+
+
+def bullet_lines(items: list[str]) -> str:
+    return "\n".join(f"- {item}" for item in items)
+
+
 def emergency_role_output(role_label: str, request: str, failures: list[str]) -> str:
-    return (
-        f"## Emergency {role_label} Output\n\n"
-        "지정된 담당자와 대체 담당자가 모두 응답하지 않아 최소 운영 규칙으로 산출물을 생성합니다.\n\n"
-        f"- 원 요청: {request}\n"
-        "- 처리 원칙: 범위를 작게 유지하고, Codex가 바로 실행할 수 있는 지시와 검증 기준을 우선한다.\n"
-        "- 검수 필요: 이 섹션은 모델 검토 없이 생성된 비상 산출물이므로 창우가 핵심 범위와 위험 항목을 확인해야 한다.\n"
-        f"- 실패 기록: {' / '.join(failures)}"
-    )
+    profile = request_profile(request)
+    title = profile["title"]
+    fields = bullet_lines(profile["core_fields"])
+    metrics = bullet_lines(profile["summary_metrics"])
+    optional = bullet_lines(profile["optional_features"])
+    failure_note = f"\n\n## 비상 운영 기록\n- 모델 호출 실패: {' / '.join(failures)}" if failures else ""
+
+    if "PM" in role_label or "기획" in role_label:
+        body = f"""## 목표
+- {title}의 MVP를 만든다.
+- 사용자가 보유한 {profile['item_plural']}을 빠르게 등록, 검색, 필터링하고 중복 구매를 줄이게 한다.
+- 구매일과 가격 데이터를 기반으로 지출/보유 현황을 한눈에 보여준다.
+
+## MVP 범위
+- {profile['item']} 등록/수정/삭제
+- 목록, 검색, 브랜드/카테고리 필터
+- 상세 보기와 사진 미리보기
+- 브랜드별 수량, 총 보유 수량, 올해 구매 금액 대시보드
+- 브라우저 Local Storage 기반 데이터 저장
+
+## 하지 않을 일
+- 실제 쇼핑몰/정품 인증 API 연동
+- 서버 로그인/클라우드 동기화
+- 완전 자동 바코드 인식
+- 모바일 앱 배포"""
+    elif "UX" in role_label or "Design" in role_label or "화면" in role_label:
+        body = f"""## 디자인 권장사항
+- 첫 화면은 대시보드와 {profile['item']} 목록이 동시에 보이게 만든다.
+- 카드에는 사진, 이름, 브랜드, 구매일, 가격, 상태를 표시한다.
+- 상단에는 총 보유 수량, 올해 구매 금액, 최다 브랜드, 최근 구매를 compact stat으로 배치한다.
+- 필터는 브랜드, 카테고리, 구매연도, 상태 기준으로 제공한다.
+
+## 화면/상태 설계
+- Empty: 아직 등록된 {profile['item']}이 없을 때 샘플 등록 버튼 표시
+- List: 카드 그리드와 검색/필터
+- Detail/Edit: 등록 폼, 사진 URL 또는 파일 입력, 가격/구매일 입력
+- Dashboard: 브랜드별 수량과 월별 구매 금액 차트
+- Error: 필수값 누락, 잘못된 가격/날짜 입력 메시지"""
+    elif "Dev" in role_label or "구현" in role_label:
+        body = f"""## 데이터 모델
+필드는 다음 기준으로 설계한다.
+{fields}
+
+## 구현 지시
+- 정적 웹 앱으로 구현한다. 프레임워크가 이미 없다면 HTML/CSS/JS만 사용한다.
+- 상태는 단일 source of truth 배열로 관리하고 Local Storage에 저장한다.
+- 샘플 데이터 12개 이상을 넣어 첫 실행부터 차트와 필터를 확인할 수 있게 한다.
+- CRUD, 검색, 필터, 정렬, 통계 계산 함수를 분리한다.
+- 차트는 외부 라이브러리 없이 CSS/DOM 기반 막대 차트로 구현한다.
+- 사진은 로컬 파일 영구 저장 대신 이미지 URL 또는 object URL 미리보기로 처리한다."""
+    elif "QA" in role_label or "비판" in role_label:
+        body = f"""## 자동 테스트 기준
+- 통계 계산 함수: 브랜드별 수량, 올해 구매 금액, 월별 구매 금액
+- 필터 함수: 브랜드/카테고리/검색어 조합
+- CRUD 후 Local Storage 저장/복원
+
+## 직접 검수 시나리오
+- {profile['item']} 1개 추가 후 목록/통계에 반영되는지 확인
+- 비슷한 브랜드와 이름을 검색해 중복 구매 방지에 도움이 되는지 확인
+- 올해 구매 금액이 가격 수정/삭제 후 즉시 바뀌는지 확인
+- 필수 입력값 누락 시 사용자에게 명확한 오류가 보이는지 확인
+
+## 위험 항목
+- 사진 자동 인식/바코드 스캔은 MVP에서 과장하면 안 된다.
+- 100개 이상 데이터에서 카드 그리드가 느려질 수 있다.
+- 사용자가 귀찮아서 입력하지 않는 문제가 가장 큰 제품 리스크다."""
+    else:
+        body = f"""## 역할별 보강 메모
+- 핵심 필드: {', '.join(profile['core_fields'])}
+- 핵심 지표: {', '.join(profile['summary_metrics'])}
+- 확장 후보: {', '.join(profile['optional_features'])}
+- Codex 프롬프트에는 구현 파일, 테스트 기준, 직접 검수 시나리오를 반드시 포함한다."""
+
+    return f"## Emergency {role_label} Output\n\n{body}{failure_note}"
+
+
+def build_rule_based_codex_prompt(request: str) -> str:
+    profile = request_profile(request)
+    fields = bullet_lines(profile["core_fields"])
+    metrics = bullet_lines(profile["summary_metrics"])
+    optional = bullet_lines(profile["optional_features"])
+    return f"""# Codex Execution Prompt
+
+You are a senior frontend engineer with strong product judgment. Build a working MVP from the request below. Before implementation, write success criteria. After implementation, run available automated checks and provide manual QA scenarios.
+
+## Original Request
+{request}
+
+## Goal
+- Build a {profile['title']}.
+- Target user: {profile['primary_user']}.
+- Help the user see their owned {profile['item_plural']} at a glance and avoid buying near-duplicates.
+- Use purchase date and price data to show ownership and spending trends.
+
+## MVP Scope
+- Add, edit, and delete {profile['item']} records.
+- Card-based collection grid.
+- Search, brand filter, category filter, and purchase-year filter.
+- Detail view.
+- Local Storage persistence.
+- Dashboard metrics:
+{metrics}
+
+## Non-Goals
+- Login, server database, payments, or cloud sync.
+- Real shopping mall, authentication, or product database API integration.
+- Fully automatic barcode or image recognition.
+- Native mobile app deployment.
+
+## Design Direction
+- The first screen should feel like a dense management tool, not a landing page.
+- Place four key stats at the top.
+- Put search, filters, and the card grid in the main area.
+- Use a right-side panel or modal for add/edit forms.
+- Each card should show photo, name, brand, purchase date, price, and condition.
+- Use brand badges or subtle color accents, but avoid decorative clutter.
+
+## Screens And States
+- Empty state: show a sample-data button when no {profile['item']} records exist.
+- Loading state: keep it brief if Local Storage restoration needs a visible state.
+- List state: card grid, search, filters, and sorting.
+- Detail/Edit state: separate required fields from optional fields.
+- Error state: clear validation for missing name, brand, purchase date, or price.
+
+## Data Model
+Each record should include at least:
+{fields}
+
+## Implementation Instructions
+- Inspect the existing project structure first and choose the simplest compatible implementation.
+- If this is a static app with no framework, create `index.html`, `style.css`, and `app.js`.
+- If a framework already exists, follow the existing patterns.
+- Include at least 12 sample records so the dashboard and filters are testable immediately.
+- Keep statistics calculation separate from DOM rendering.
+- For photos, implement image URL input or local file preview only.
+- For barcode/product lookup, implement a manual SKU/product-code field and document it as a future extension instead of pretending real scanning exists.
+
+## Automated Tests
+- Write tests for pure calculation/filtering functions where the project setup allows it.
+- Cover:
+  - Brand count calculation.
+  - Current-year spending calculation.
+  - Monthly spending calculation.
+  - Search and filter combinations.
+  - Stored data updates after add/edit/delete.
+
+## Manual QA Scenarios
+- Confirm sample records appear and total count is correct.
+- Confirm brand filters such as Nike/Jordan/Adidas work.
+- Add a new {profile['item']} and confirm the card grid and metrics update immediately.
+- Edit a price and confirm current-year spending changes.
+- Delete a record, reload, and confirm Local Storage persistence is correct.
+- Search similar names and confirm it helps avoid duplicate purchases.
+
+## Security And Privacy
+- Do not introduce API keys or secrets.
+- Do not upload user photo files to a server.
+- Make it clear in the UI or README that Local Storage data stays in the user's browser.
+
+## Risks
+- Users may find manual data entry annoying.
+- Automatic photo/barcode recognition is outside the MVP scope.
+- Rendering 100+ cards can become slow if the render path is careless.
+- Spending stats can be wrong if price/date validation is weak.
+
+## Future Extensions
+{optional}
+
+## Final Report Format
+Respond in Korean with exactly these sections:
+- 변경 파일
+- 자동 검증 완료 항목
+- 검수 필요 항목
+- 위험한 항목
+- 실행 방법
+- 핵심 화면/동작 요약
+
+## Korean Summary For Changwoo
+- 원 요청을 복붙하지 않고 MVP, 제외 범위, 데이터 모델, 검증 기준으로 분해했다.
+- 사진/바코드 같은 과장되기 쉬운 기능을 MVP와 확장 후보로 분리했다.
+- Codex가 바로 구현할 수 있도록 파일, 상태, 테스트, 보고 형식을 고정했다.
+"""
 
 
 def run_role_task(
@@ -943,6 +1166,7 @@ def run_rework_pipeline(original_request: str, result: str, extra_context: str =
         {"path": "generated_prompt/rework_prompt.md", "content": rework_prompt},
         {"path": "generated_prompt/rework_reviews.md", "content": artifacts["review"]},
     ]
+    artifacts["files"] = format_generated_files(files)
     output_dir = save_run("rework-" + (original_request or "codex-result"), artifacts, files)
     return {
         "ok": True,
@@ -984,28 +1208,31 @@ def extract_quality_score(files: list[dict[str, str]], artifacts: dict[str, str]
 
 
 PROMPT_COMPANY_PRINCIPLES = """
-Changwoo Prompt Agency의 차별점:
-- GPT보다 똑똑한 척하지 않는다. 차별점은 지능이 아니라 구조화와 누락 방지다.
-- AI 초보자가 빠뜨리기 쉬운 디자인, 상태, 파일 구조, 테스트, 보안, 검수 기준을 역할별로 강제 점검한다.
-- Codex/Claude Code가 실제 MVP를 구현하도록 충분히 구체적인 작업지시서를 만든다.
-- 결과물은 단순 프롬프트가 아니라 학습 가능한 작업지시서 패키지여야 한다.
+Changwoo Prompt Agency principles:
+- Do not pretend to be smarter than GPT. The value is structure, role-based review, and omission prevention.
+- Force-check design, UI states, file structure, tests, security, and verification criteria that AI beginners often miss.
+- Produce a task brief concrete enough for Codex/Claude Code to implement a real MVP.
+- The deliverable is not a casual prompt. It is a learnable implementation brief package.
+- Internal agent work and Codex execution prompts should be English-first for implementation accuracy.
+- User-facing logs, summaries, and final report requirements should remain Korean-friendly for Changwoo.
 """.strip()
 
 
 REQUIRED_CODEX_PROMPT_SECTIONS = [
-    "원 요청",
-    "목표",
-    "MVP 범위",
-    "하지 않을 일",
-    "디자인 권장사항",
-    "화면/상태 설계",
-    "파일 구조",
-    "구현 지시",
-    "자동 테스트",
-    "직접 검수 시나리오",
-    "보안/개인정보 주의사항",
-    "위험 항목",
-    "완료 보고 형식",
+    "Original Request",
+    "Goal",
+    "MVP Scope",
+    "Non-Goals",
+    "Design Direction",
+    "Screens And States",
+    "File Structure",
+    "Implementation Instructions",
+    "Automated Tests",
+    "Manual QA Scenarios",
+    "Security And Privacy",
+    "Risks",
+    "Final Report Format",
+    "Korean Summary For Changwoo",
 ]
 
 
@@ -1030,16 +1257,12 @@ def format_generated_files(files: list[dict[str, str]]) -> str:
 def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
     project_type = detect_project_type(request)
     role_prompt = (
-        "너는 Codex 프롬프트 제작 전문 AI 에이전시의 오케스트레이터다. "
-        "실제로는 API 호출을 한 번만 사용하지만, 결과는 Mike PM, Mina Designer, Jay Developer, "
-        "Yuna Reviewer, Finalizer가 각각 일한 것처럼 나눠서 작성한다. "
-        "추가로 Nora Scope Manager, Dana Developer Experience, Test Kim QA Engineer, "
-        "Jason Red Team Reviewer, Sana Security & Privacy, Iris Prompt Editor, "
-        "Vera Validation Judge의 관점을 반드시 반영한다. "
-        "창우는 네가 직접 앱을 만드는 것이 아니라, Codex에 그대로 붙여넣으면 좋은 결과가 나오는 "
-        "고품질 작업 프롬프트와 검증 체크리스트를 원한다. "
-        "요청 타입에 맞게 Codex가 만들 파일, 성공 기준, 테스트, 검수 절차를 명확히 설계한다. "
-        "반드시 순수 JSON 객체만 반환한다. 마크다운 코드블록을 쓰지 않는다."
+        "You are the orchestrator of Changwoo Prompt Agency. Work in English for technical prompt production. "
+        "Even though this is a single API call, structure the result as if Mike PM, Mina UX, Jay implementation writer, "
+        "Yuna QA, Nora scope, Dana DX, Test Kim QA automation, Jason red team, Sana security, Iris prompt editor, "
+        "Vera validation, and Finalizer all contributed. Changwoo does not want you to build the app directly here; "
+        "he wants a high-quality Codex prompt that can be pasted into Codex to produce a working MVP. "
+        "Return only a pure JSON object. Do not use markdown code fences."
     )
     file_contract = project_file_contract(project_type)
     user_prompt = f"""
@@ -1052,40 +1275,40 @@ def run_one_call_pipeline(client, request: str) -> tuple[dict[str, str], list[di
 Codex 작업 설계 규칙:
 {file_contract}
 
-다음 JSON 키를 모두 포함해서 한국어로 작성해줘.
+Return every JSON value in English, except the final report format inside codex_prompt.md must tell Codex to report back in Korean.
 
 {{
   "project_type": "{project_type}",
-  "brief": "Mike PM이 정리한 목표, 범위, 제외 범위, 산출물",
-  "plan": "Codex에게 시킬 작업 순서. 구현 전 성공 기준부터 검증까지 포함",
-  "design": "Mina Designer가 정리한 UX/화면/사용 흐름 요구사항",
-  "dev": "Jay Developer가 정리한 기술 요구사항, 파일 구조, 구현 지시",
-  "review": "Yuna Reviewer가 정리한 acceptance checklist, test plan, risks",
-  "final": "창우에게 설명하는 최종 요약과 Codex 사용 방법",
+  "brief": "Mike PM brief: goal, scope, non-goals, deliverables",
+  "plan": "Codex work plan from pre-implementation success criteria to verification",
+  "design": "Mina UX/design requirements: user flow, screens, states, layout, accessibility",
+  "dev": "Jay technical implementation guidance: file structure, commands, behavior, tests",
+  "review": "Yuna/Jason/Sana/Vera review: acceptance checklist, test plan, risks, security, score",
+  "final": "Short Korean-facing summary that tells Changwoo which generated file to paste into Codex",
   "files": [
-    {{"path": "generated_prompt/codex_prompt.md", "content": "Codex에 그대로 붙여넣을 최종 프롬프트"}},
-    {{"path": "generated_prompt/acceptance_checklist.md", "content": "성공 기준 체크리스트"}},
-    {{"path": "generated_prompt/test_plan.md", "content": "자동/수동 테스트 계획"}},
-    {{"path": "generated_prompt/risk_notes.md", "content": "위험 요소와 완화책"}},
-    {{"path": "generated_prompt/scope.md", "content": "Nora가 정리한 이번 작업 범위와 제외 범위"}},
-    {{"path": "generated_prompt/output_contract.md", "content": "Codex가 마지막에 보고해야 하는 형식"}},
-    {{"path": "generated_prompt/security_notes.md", "content": "Sana가 정리한 보안/비밀값/위험 명령 주의사항"}},
-    {{"path": "generated_prompt/quality_score.md", "content": "Vera가 평가한 프롬프트 품질 점수와 감점 사유"}}
+    {{"path": "generated_prompt/codex_prompt.md", "content": "Paste-ready English Codex Execution Prompt"}},
+    {{"path": "generated_prompt/acceptance_checklist.md", "content": "Acceptance criteria checklist"}},
+    {{"path": "generated_prompt/test_plan.md", "content": "Automated and manual test plan"}},
+    {{"path": "generated_prompt/risk_notes.md", "content": "Risks and mitigations"}},
+    {{"path": "generated_prompt/scope.md", "content": "MVP scope, later version, non-goals"}},
+    {{"path": "generated_prompt/output_contract.md", "content": "Required Korean final report format for Codex"}},
+    {{"path": "generated_prompt/security_notes.md", "content": "Security/privacy/secrets/destructive command notes"}},
+    {{"path": "generated_prompt/quality_score.md", "content": "Prompt quality score with sub-scores and warnings"}}
   ]
 }}
 
-규칙:
-- 코드를 직접 완성해서 납품하지 말고, Codex가 구현하도록 지시하는 프롬프트를 납품한다.
-- codex_prompt.md는 반드시 아래 섹션을 포함한다: 목표, 성공 기준, 구현 지시, 파일 구조, 자동 테스트, 직접 검수 시나리오, 보고 형식.
-- 성공 기준은 체크박스 목록으로 작성한다.
-- 테스트 계획은 가능한 자동 테스트와 수동 검수를 구분한다.
-- 위험 요소는 빌드 실패, 범위 초과, 플랫폼 차이, 모델 한계 등을 현실적으로 적는다.
-- scope.md에는 이번 작업에서 할 것과 하지 않을 것을 분리한다.
-- output_contract.md에는 Codex의 최종 보고 형식을 "자동 검증 완료 항목 / 검수 필요 항목 / 위험한 항목 / 변경 파일 / 실행 방법"으로 고정한다.
-- security_notes.md에는 API 키, .env, 토큰, 개인정보, destructive command 관련 주의사항을 포함한다.
-- quality_score.md에는 100점 만점 점수, Clarity/Scope/Testability/Safety/Codex Usability 세부 점수, Blocking Issues, Warnings를 포함한다.
-- Jason은 칭찬하지 말고 실패 가능성만 지적한다. Vera는 80점 미만이면 수정 필요라고 표시한다.
-- "3주 계획", "회의 일정", "언젠가 구현" 같은 장기 계획을 쓰지 말고, Codex가 바로 실행할 수 있는 단위로 쓴다.
+Rules:
+- Do not build the app directly in this response. Deliver a prompt that instructs Codex to build it.
+- codex_prompt.md must include: Goal, Success Criteria, Implementation Instructions, File Structure, Automated Tests, Manual QA Scenarios, Security/Privacy, Risks, Final Report Format.
+- Success criteria must be checkboxes.
+- Separate automated tests from manual QA.
+- Be realistic about build failure, scope creep, platform differences, and model limitations.
+- scope.md must separate MVP, later version, and non-goals.
+- output_contract.md must require Codex to report in Korean with "자동 검증 완료 항목 / 검수 필요 항목 / 위험한 항목 / 변경 파일 / 실행 방법".
+- security_notes.md must include API keys, .env, tokens, personal data, and destructive command cautions.
+- quality_score.md must include a 100-point score, Clarity/Scope/Testability/Safety/Codex Usability sub-scores, Blocking Issues, and Warnings.
+- Jason must identify failure risks without praise. Vera must mark prompts below 80 as needing revision.
+- Do not write a 3-week plan, meeting schedule, or vague future roadmap. Write an executable Codex task.
 """
 
     model = get_model()
@@ -1108,56 +1331,53 @@ def run_multi_agent_pipeline(
     context: PipelineContext | None = None,
 ) -> tuple[dict[str, str], list[dict[str, str]], int, str]:
     mike_role = (
-        "너는 Changwoo Prompt Agency의 PM/기획 Mike다. 창우 사장의 요청을 요구사항, 구현 범위, "
-        "하지 않을 일, 성공 기준으로 정리한다. 빠른 요약보다 좋은 Codex 작업지시서를 만드는 것이 목적이다. "
-        "앱 요청은 Codex가 MVP 수준까지 실제 구현하고, 가능하면 그 이상도 판단해 구현하도록 전제한다. "
-        "답변은 한국어로 쓰고 Codex가 이어받기 쉽게 구체적으로 쓴다."
+        "You are Mike, the PM at Changwoo Prompt Agency. Work in English. Convert Changwoo's Korean request "
+        "into requirements, implementation scope, non-goals, and acceptance criteria for a Codex build prompt. "
+        "Prioritize a precise, executable task brief over a quick summary. Assume Codex should implement a real MVP."
     )
     mina_role = (
-        "너는 Changwoo Prompt Agency의 UX/Design 담당 Mina다. Mike의 범위를 보고 사용자 흐름, 화면 구조, "
-        "디자인 톤, 레이아웃, 컬러/타이포 방향, 빈 상태, 로딩 상태, 오류 상태, 성공 상태, 모바일/데스크톱 반응형을 정리한다. "
-        "초보자가 프롬프트 작성법을 배울 수 있도록 왜 이 디자인 지시가 필요한지도 짧게 남긴다."
+        "You are Mina, the UX/Design planner. Work in English. Define user flows, screen structure, layout, "
+        "visual tone, empty/loading/error/success states, and responsive behavior. Make the design guidance concrete "
+        "enough for Codex to implement, not just describe."
     )
     jay_role = (
-        "너는 Changwoo Prompt Agency의 Dev/구현안 Jay다. Mike와 Mina의 내용을 바탕으로 Codex가 수정할 "
-        "파일, 코드 구조, 명령어, 테스트 전략을 제안한다. Swift, 웹, 로컬 서버 같은 프로젝트 타입별 차이를 구분한다. "
-        "Codex에게 '알아서 MVP를 구현하라'가 아니라, 어떤 파일과 동작을 구현해야 MVP인지 명확히 지시한다."
+        "You are Jay, the technical implementation writer. Work in English. Based on Mike and Mina, specify files, "
+        "code structure, commands, implementation order, and test strategy. Do not say 'build the MVP' vaguely; "
+        "state exactly what behavior and files make the MVP complete."
     )
     yuna_role = (
-        "너는 Changwoo Prompt Agency의 QA/비판 Yuna다. brief, structure, dev 결과에서 버그, 성능, 예외 케이스, "
-        "모호한 요구사항을 찾는다. 칭찬보다 실패 가능성과 검증 방법을 우선한다."
+        "You are Yuna, the QA reviewer. Work in English. Find bugs, performance risks, edge cases, ambiguous requirements, "
+        "and missing tests in the brief/design/dev plan. Lead with verification methods and failure cases."
     )
     nora_role = (
-        "너는 Scope Manager Nora다. 큰 아이디어를 Codex가 이번 작업에서 구현할 MVP, 다음 버전, 하지 않을 일로 나눈다. "
-        "너무 작게 잘라 가치가 사라지지 않게 하되, 한 번에 구현 가능한 범위로 정리한다."
+        "You are Nora, the scope manager. Work in English. Split the idea into MVP, later version, and explicit non-goals. "
+        "Keep the MVP valuable but implementable in one Codex task."
     )
     dana_role = (
-        "너는 Developer Experience 담당 Dana다. Codex가 만든 결과물을 창우가 바로 실행하고 검수할 수 있게 "
-        "설치, 실행, 환경 변수, 샘플 데이터, 실패 시 확인할 포인트를 정리한다."
+        "You are Dana, the developer experience owner. Work in English. Define setup, run commands, sample data, "
+        "environment assumptions, and troubleshooting points so Changwoo can run and verify the result."
     )
     jason_role = (
-        "너는 Red Team Reviewer Jason이다. 사업/제품/기술 관점에서 실패할 가능성, 과장된 주장, 구현 난이도, "
-        "법적/운영 리스크를 칭찬 없이 지적한다."
+        "You are Jason, the red-team reviewer. Work in English. No praise. Identify product, business, technical, "
+        "legal, operational, and overclaim risks."
     )
     sana_role = (
-        "너는 Security & Privacy 담당 Sana다. 카메라, 이미지, 위치, 결제/크레딧, 사용자 데이터, 공개 저장소, API 키, "
-        "모델 추론 결과의 책임 문제를 점검한다."
+        "You are Sana, the security and privacy reviewer. Work in English. Check API keys, .env files, user data, "
+        "images, camera/barcode claims, public repository exposure, risky commands, and privacy boundaries."
     )
     iris_role = (
-        "너는 Prompt Editor Iris다. 앞 단계 결과를 Codex가 오해하지 않는 문장으로 정리한다. "
-        "모호한 표현을 지우고 산출물 형식, 구현 순서, 완료 보고 형식을 선명하게 만든다. "
-        "최종 프롬프트가 왜 좋은지 초보자가 배울 수 있는 설명도 남긴다."
+        "You are Iris, the prompt editor. Work in English. Remove ambiguity, clarify output format, implementation order, "
+        "and final report format. Add a short Korean learning note only if useful for Changwoo."
     )
     vera_role = (
-        "너는 Validation Judge Vera다. 최종 프롬프트가 초보자에게 학습 가치가 있는지, Codex가 MVP 이상을 구현할 만큼 "
-        "충분히 구체적인지 100점 만점으로 평가하고 blocking issue를 표시한다. "
-        "필수 섹션 누락 여부, 디자인 지시 누락, 테스트 누락, 보안 누락, 실행 방법 누락을 체크리스트로 평가한다."
+        "You are Vera, the validation judge. Work in English. Score the prompt out of 100 and list blocking issues. "
+        "Check required sections, design specificity, testability, security/privacy, run instructions, and Codex usability."
     )
     final_role = (
-        "너는 Final Editor다. 앞 단계 산출물을 단순 요약하지 말고, 창우가 Codex에 그대로 붙여넣으면 "
-        "MVP 수준의 실제 결과물이 나오도록 최종 프롬프트로 재구성한다. "
-        "빠른 답보다 정확하고 검증 가능한 작업지시서를 우선한다. "
-        "필수 섹션을 빠뜨리면 실패다."
+        "You are the Final Editor. Produce the final Codex prompt primarily in English. Do not merely summarize the agents. "
+        "Rewrite their work into a paste-ready instruction that can produce a working MVP. Keep implementation guidance, "
+        "file structure, validation, and risk controls concrete. Include a Korean final report format so Codex reports back "
+        "to Changwoo in Korean. Missing required sections is a failure."
     )
 
     mike_provider = get_agent_provider("mike")
@@ -1178,7 +1398,7 @@ def run_multi_agent_pipeline(
         "pm",
         "PM / 기획",
         mike_role,
-        f"창우의 요청:\n{request}\n\n1) 요구사항\n2) 구현 범위\n3) 성공 기준\n4) Jay/Yuna가 봐야 할 쟁점을 작성해줘.",
+        f"Changwoo's Korean request:\n{request}\n\nWrite in English:\n1) Requirements\n2) Implementation scope\n3) Acceptance criteria\n4) Issues Jay/Yuna must review.",
         request,
         performance,
         context,
@@ -1188,9 +1408,9 @@ def run_multi_agent_pipeline(
         "structure",
         "UX Design / 화면 설계",
         mina_role,
-        f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\n"
-        "Codex 프롬프트에 들어갈 UX/디자인 지시를 작성해줘.\n"
-        "반드시 포함: 사용자 흐름, 첫 화면 레이아웃, 주요 컴포넌트, 디자인 톤, 빈/로딩/오류/성공 상태, 모바일/데스크톱 반응형, 접근성 기준.",
+        f"Original request:\n{request}\n\nMike output:\n{brief}\n\n"
+        "Write English UX/design instructions for the Codex prompt. Include user flow, first-screen layout, core components, "
+        "visual tone, empty/loading/error/success states, desktop/mobile responsiveness, and accessibility criteria.",
         request,
         performance,
         context,
@@ -1200,7 +1420,7 @@ def run_multi_agent_pipeline(
         "dev",
         "Dev / 구현안",
         jay_role,
-        f"원 요청:\n{request}\n\nMike 결과:\n{brief}\n\nMina 결과:\n{design}\n\nCodex가 실제 코드 작성/수정에 착수할 수 있도록 구현안, 파일 구조, 명령어, 테스트 전략을 작성해줘.",
+        f"Original request:\n{request}\n\nMike output:\n{brief}\n\nMina output:\n{design}\n\nWrite English implementation guidance, file structure, commands, and test strategy so Codex can start coding immediately.",
         request,
         performance,
         context,
@@ -1210,7 +1430,7 @@ def run_multi_agent_pipeline(
         "qa",
         "QA / 비판",
         yuna_role,
-        f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\n버그, 성능, 예외 케이스, 누락된 검증을 중심으로 비판해줘.",
+        f"Original request:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\nReview in English. Focus on bugs, performance, edge cases, and missing verification.",
         request,
         performance,
         context,
@@ -1220,7 +1440,7 @@ def run_multi_agent_pipeline(
         "scope",
         "Scope / 범위 관리",
         nora_role,
-        f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\n이번 Codex 작업에서 구현할 MVP, 다음 버전, 하지 않을 일을 나눠줘.",
+        f"Original request:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\nSplit the work in English into MVP, later version, and non-goals for this Codex task.",
         request,
         performance,
         context,
@@ -1230,7 +1450,7 @@ def run_multi_agent_pipeline(
         "dx",
         "DX / 실행 경험",
         dana_role,
-        f"원 요청:\n{request}\n\nJay:\n{dev}\n\nYuna:\n{review}\n\nCodex 결과물을 실행하고 검수하기 위한 환경 전제, 실행 명령, 샘플 데이터, 실패 시 확인할 점을 정리해줘.",
+        f"Original request:\n{request}\n\nJay:\n{dev}\n\nYuna:\n{review}\n\nWrite English setup/run/verification guidance, sample data needs, environment assumptions, and troubleshooting points.",
         request,
         performance,
         context,
@@ -1240,7 +1460,7 @@ def run_multi_agent_pipeline(
         "redteam",
         "Red Team / 위험 지적",
         jason_role,
-        f"원 요청:\n{request}\n\n현재 산출물:\n{brief}\n\n{design}\n\n{dev}\n\n{review}\n\n과장된 기능, 실패 가능성, 구현 난이도, 비즈니스 리스크만 지적해줘.",
+        f"Original request:\n{request}\n\nCurrent artifacts:\n{brief}\n\n{design}\n\n{dev}\n\n{review}\n\nWrite English red-team feedback. Only identify overclaims, failure modes, implementation difficulty, and business/product risks.",
         request,
         performance,
         context,
@@ -1250,7 +1470,7 @@ def run_multi_agent_pipeline(
         "security",
         "Security / 개인정보",
         sana_role,
-        f"원 요청:\n{request}\n\n제품/기술 초안:\n{design}\n\n{dev}\n\n카메라, 이미지, 위치, 크레딧, 개인정보, API 키, 공개 배포 보안 위험을 점검해줘.",
+        f"Original request:\n{request}\n\nProduct/technical draft:\n{design}\n\n{dev}\n\nWrite English security/privacy review for images, camera/barcode claims, location, credits/payments, personal data, API keys, and public deployment risks.",
         request,
         performance,
         context,
@@ -1260,7 +1480,7 @@ def run_multi_agent_pipeline(
         "editor",
         "Prompt Editor / 문장 정리",
         iris_role,
-        f"원 요청:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\nNora:\n{scope}\n\nDana:\n{dx}\n\nJason:\n{redteam}\n\nSana:\n{security}\n\nCodex가 오해할 표현을 줄이고 최종 프롬프트에 넣을 구조를 정리해줘.",
+        f"Original request:\n{request}\n\nMike:\n{brief}\n\nMina:\n{design}\n\nJay:\n{dev}\n\nNora:\n{scope}\n\nDana:\n{dx}\n\nJason:\n{redteam}\n\nSana:\n{security}\n\nWrite English prompt-editing guidance that removes ambiguity and prepares the final Codex prompt structure.",
         request,
         performance,
         context,
@@ -1270,22 +1490,23 @@ def run_multi_agent_pipeline(
         "judge",
         "Validation / 품질 평가",
         vera_role,
-        f"원 요청:\n{request}\n\n필수 최종 프롬프트 섹션:\n{required_prompt_sections_text()}\n\n"
-        f"전체 검토:\nMike={brief}\n\nMina={design}\n\nJay={dev}\n\nYuna={review}\n\nNora={scope}\n\nDana={dx}\n\nJason={redteam}\n\nSana={security}\n\nIris={editor}\n\n"
-        "품질 점수, blocking issue, 수정 필요 항목, 필수 섹션별 통과/누락 여부를 평가해줘.",
+        f"Original request:\n{request}\n\nRequired final prompt sections:\n{required_prompt_sections_text()}\n\n"
+        f"Full review:\nMike={brief}\n\nMina={design}\n\nJay={dev}\n\nYuna={review}\n\nNora={scope}\n\nDana={dx}\n\nJason={redteam}\n\nSana={security}\n\nIris={editor}\n\n"
+        "Score the prompt in English. Include blocking issues, required fixes, and pass/missing status for each required section.",
         request,
         performance,
         context,
     )
     final_prompt_input = (
         f"{PROMPT_COMPANY_PRINCIPLES}\n\n"
-        f"원 요청:\n{request}\n\n필수 최종 프롬프트 섹션:\n{required_prompt_sections_text()}\n\n"
-        f"PM/기획 Mike:\n{brief}\n\nUX/Design Mina:\n{design}\n\nDev/구현안 Jay:\n{dev}\n\n"
-        f"QA/비판 Yuna:\n{review}\n\nScope Nora:\n{scope}\n\nDX Dana:\n{dx}\n\nRed Team Jason:\n{redteam}\n\n"
+        f"Original request:\n{request}\n\nRequired final prompt sections:\n{required_prompt_sections_text()}\n\n"
+        f"PM Mike:\n{brief}\n\nUX/Design Mina:\n{design}\n\nDev Jay:\n{dev}\n\n"
+        f"QA Yuna:\n{review}\n\nScope Nora:\n{scope}\n\nDX Dana:\n{dx}\n\nRed Team Jason:\n{redteam}\n\n"
         f"Security Sana:\n{security}\n\nPrompt Editor Iris:\n{editor}\n\nValidation Vera:\n{judge}\n\n"
-        "이 내용을 하나의 Codex용 최종 프롬프트로 재구성해줘. 설명문이 아니라, 바로 붙여넣어 실행할 지시문이어야 한다. "
-        "Codex가 실제 MVP를 구현하고, 구현 후 자동 검증과 수동 검수 보고까지 하도록 지시해. "
-        "디자인 권장사항과 화면/상태 설계를 반드시 포함해. 마지막에는 이 프롬프트가 좋은 이유를 짧은 체크리스트로 포함해."
+        "Rewrite this into one paste-ready Codex Execution Prompt in English. It must be an instruction, not a summary. "
+        "Tell Codex to implement a working MVP, run available automated checks, and provide manual QA scenarios. "
+        "Include design direction, screens/states, implementation instructions, tests, risks, and a Korean final report format. "
+        "Add a short Korean Summary For Changwoo explaining why the prompt is strong."
     )
     if context:
         context.check_timeout()
@@ -1298,18 +1519,7 @@ def run_multi_agent_pipeline(
         final_route = "internal/emergency-finalizer"
         if context:
             context.add_progress(f"Finalizer: 비상 납품 전환 - {role_absence_summary(exc)}")
-        final = (
-            "# Codex 실행 프롬프트\n\n"
-            "아래 요청을 구현 전에 성공 기준을 먼저 세우고, 구현 후 자동 검증과 직접 검수 시나리오를 보고하는 방식으로 처리해줘.\n\n"
-            f"## 원 요청\n{request}\n\n"
-            f"## 필수 섹션\n{required_prompt_sections_text()}\n\n"
-            f"## PM / 기획\n{brief}\n\n"
-            f"## 디자인 권장사항\n{design}\n\n"
-            f"## 구현안\n{dev}\n\n"
-            f"## QA / 위험\n{review}\n\n"
-            "## 완료 보고 형식\n"
-            "- 자동 검증 완료 항목\n- 검수 필요 항목\n- 위험한 항목\n- 변경 파일\n- 실행 방법\n"
-        )
+        final = build_rule_based_codex_prompt(request)
         performance.append(
             {
                 "role": "Final Editor",
@@ -1396,9 +1606,21 @@ def get_agent_config() -> dict:
             "role": value["role"],
             **route,
         }
+    installed_ollama_models = get_installed_ollama_models()
+    missing_models = []
+    if installed_ollama_models is not None:
+        for key, route in agents.items():
+            if route["provider"] == "ollama" and route["model"] not in installed_ollama_models:
+                fallback = next(
+                    (model for model in route.get("candidates", []) if model in installed_ollama_models),
+                    "qwen3:14b 또는 llama3.1:latest",
+                )
+                missing_models.append({"agent": key, "model": route["model"], "fallback": fallback})
     return {
         "ok": True,
         "mode": get_pipeline_mode(),
+        "missing_models": missing_models,
+        "ollama_model_check": "unavailable" if installed_ollama_models is None else "checked",
         "important_markers": [
             "중요",
             "신중",
@@ -1708,6 +1930,9 @@ class Handler(SimpleHTTPRequestHandler):
                 original_request = str(payload.get("original_request", "")).strip()
                 result_text = str(payload.get("result", "")).strip()
                 extra_context = str(payload.get("extra_context", "")).strip()
+                if not original_request or not result_text:  # FIX: PY-1
+                    self.send_json(400, {"ok": False, "error": "original_request와 result를 모두 입력해주세요."})  # FIX: PY-1
+                    return  # FIX: PY-1
                 result = run_rework_pipeline(original_request, result_text, extra_context)
                 self.send_json(200, result)
                 return

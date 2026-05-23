@@ -135,6 +135,7 @@ let running = false;
 let runToken = 0;
 let activeRequestController = null;
 let activeJobId = null;
+let sideActionRunning = false;
 let selectedAgent = "dana";
 let chatHistory = loadChatHistory();
 let agentConfig = defaultAgentConfig;
@@ -143,8 +144,8 @@ function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function pickOne(items, seed = Date.now()) {
-  return items[Math.abs(seed) % items.length];
+function pickOne(items) {
+  return items[Math.floor(Math.random() * items.length)]; // FIX: JS-4
 }
 
 async function waitForVisualStep(promise, ms, token, timeoutLog) {
@@ -229,11 +230,15 @@ function renderModelConfig() {
   if (!els.modelRouting) return;
   const normal = agentConfig.finalizer?.normal?.join(" -> ") || "gemini/gemini-2.0-flash -> ollama/qwen3:14b";
   const important = agentConfig.finalizer?.important?.join(" -> ") || "gemini/gemini-2.5-pro -> gemini/gemini-2.5-flash -> gemini/gemini-2.5-flash-lite -> gemini/gemini-2.0-flash -> ollama/qwen3:14b";
+  const missingModels = agentConfig.missing_models?.length
+    ? `<p>Ollama 경고: ${agentConfig.missing_models.map((item) => `${item.agent}/${item.model}`).join(", ")} 없음. fallback 후보를 사용합니다.</p>`
+    : "";
   els.modelRouting.innerHTML = `
     <strong>Model Routing</strong>
     <p>Pipeline: ${agentConfig.mode || "multi"}</p>
     <p>평소 Final: ${normal}</p>
     <p>중요 Final: ${important}</p>
+    ${missingModels}
   `;
 }
 
@@ -371,6 +376,19 @@ function setTask(status, task) {
 
 function setSideStatus(text) {
   els.agentChatStatus.textContent = text;
+}
+
+function setAgentActionsDisabled(disabled) {
+  els.askAgentButton.disabled = disabled;
+  els.reviewArtifactButton.disabled = disabled;
+}
+
+function setSideActionRunning(active) {
+  sideActionRunning = active;
+  if (!running) {
+    els.startButton.disabled = active;
+    els.reworkButton.disabled = active;
+  }
 }
 
 function showSpeech(agentKey, text, token = null) {
@@ -756,7 +774,7 @@ function updateArtifactCount() {
 }
 
 function renderArtifact() {
-  els.artifactOutput.textContent = artifacts[activeArtifact] || "아직 생성되지 않았습니다.";
+  els.artifactOutput.textContent = artifacts[activeArtifact] || "아직 실행 전입니다."; // FIX: JS-5
   els.tabs.forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.artifact === activeArtifact);
   });
@@ -915,6 +933,8 @@ function resetOffice() {
   renderArtifact();
   els.startButton.disabled = false;
   els.reworkButton.disabled = false;
+  sideActionRunning = false;
+  setAgentActionsDisabled(false);
 }
 
 async function sendEveryoneHome(token = null) {
@@ -926,6 +946,7 @@ async function sendEveryoneHome(token = null) {
     Object.keys(els.agents).map((agentKey) => {
       const home = positions[agentKey]?.home;
       if (!home) return Promise.resolve();
+      if (agentKey === "changwoo") return moveAgentPath(agentKey, [positions.hallway.boss, home], `${agentLabels[agentKey]} is returning to desk`, token); // FIX: JS-3
       return moveAgentPath(agentKey, [positions.hallway.delivery, home], `${agentLabels[agentKey]} is returning to desk`, token);
     })
   );
@@ -938,11 +959,13 @@ async function sendEveryoneHome(token = null) {
 }
 
 async function runOffice() {
-  if (running) return;
+  if (running || sideActionRunning) return;
   running = true;
   runToken += 1;
   const token = runToken;
   els.startButton.disabled = true;
+  els.reworkButton.disabled = true; // FIX: JS-1
+  setAgentActionsDisabled(true);
   logs = [];
   artifacts = { log: "" };
   pendingArtifacts = {};
@@ -984,7 +1007,8 @@ async function runOffice() {
         addLog(`생성 프롬프트: ${backendResult.files.join(", ")}`);
       }
     } catch (error) {
-      if (error.name === "AbortError" || !isCurrentRun(token)) {
+      if (!isCurrentRun(token)) return;
+      if (error.name === "AbortError") {
         addLog("작업이 취소되었습니다.");
         setTask("Canceled", "Request canceled");
         return;
@@ -997,6 +1021,7 @@ async function runOffice() {
       running = false;
       els.startButton.disabled = false;
       els.reworkButton.disabled = false;
+      setAgentActionsDisabled(false);
       return;
     }
   } else {
@@ -1025,6 +1050,12 @@ async function runOffice() {
   await Promise.all([say("mina", "검수 가능한 화면 기준으로 쓸게요.", 1100, token), say("jay", "Codex가 바로 실행할 명령으로 정리합니다.", 1100, token)]);
   if (!isCurrentRun(token)) return;
   addLog("Mike, Mina, Jay가 짧은 회의를 마쳤습니다.");
+
+  await Promise.all([
+    moveAgentPath("nora", [positions.nora.home, positions.nora.meeting], "Nora is joining the meeting", token), // FIX: JS-2
+    moveAgentPath("dana", [positions.dana.home, positions.dana.meeting], "Dana is joining the meeting", token), // FIX: JS-2
+  ]);
+  if (!isCurrentRun(token)) return;
 
   await Promise.all([
     moveAgentPath("mina", [positions.mina.mike, positions.mina.work], "Mina is designing", token),
@@ -1101,10 +1132,11 @@ async function runOffice() {
   running = false;
   els.startButton.disabled = false;
   els.reworkButton.disabled = false;
+  setAgentActionsDisabled(false);
 }
 
 async function runReworkMode() {
-  if (running) return;
+  if (running || sideActionRunning) return;
   const result = els.reworkInput.value.trim();
   if (!result) {
     els.reworkInput.focus();
@@ -1117,6 +1149,7 @@ async function runReworkMode() {
   const token = runToken;
   els.startButton.disabled = true;
   els.reworkButton.disabled = true;
+  setAgentActionsDisabled(true);
   logs = [];
   artifacts = { log: "" };
   pendingArtifacts = {};
@@ -1174,17 +1207,24 @@ async function runReworkMode() {
             dev: "Jay가 구현 수정 지시를 작성합니다.",
             review: "Jason/Sana/Vera가 위험과 점수를 확인합니다.",
             final: `# Codex 재작업 지시서\n\n## 현재 결과물\n${result}\n\n## 수정 지시\n로컬 서버에서 실제 Rework Mode를 실행하면 역할별 검토가 반영됩니다.`,
+            files: "# Generated Prompt Files\n\n## generated_prompt/rework_prompt.md\nCodex에 붙여넣을 재작업 지시서",
             hr: "# Rework Demo\n\n- 공개 링크 데모 모드",
           },
         };
     if (!isCurrentRun(token)) return;
     pendingArtifacts = payload.artifacts;
+    if (!pendingArtifacts.files) {
+      pendingArtifacts.files = payload.files?.length
+        ? ["# Generated Prompt Files", "", ...payload.files.map((file) => `- \`${file}\``)].join("\n")
+        : "# Generated Prompt Files\n\nRework 결과 파일 정보가 없습니다.";
+    }
     artifacts.brief = pendingArtifacts.brief;
     artifacts.plan = pendingArtifacts.plan;
     artifacts.design = pendingArtifacts.design;
     artifacts.dev = pendingArtifacts.dev;
     artifacts.review = pendingArtifacts.review;
     artifacts.final = pendingArtifacts.final;
+    artifacts.files = pendingArtifacts.files;
     artifacts.hr = pendingArtifacts.hr;
     addLog(`Rework completed with ${payload.model}`);
     addLog(`실제 API 호출 수: ${payload.calls || 0}`);
@@ -1200,7 +1240,8 @@ async function runReworkMode() {
     toggleArtifactPanel(true);
     setTask("Done", "Rework prompt is ready");
   } catch (error) {
-    if (error.name === "AbortError" || !isCurrentRun(token)) {
+    if (!isCurrentRun(token)) return;
+    if (error.name === "AbortError") {
       addLog("재작업이 취소되었습니다.");
       setTask("Canceled", "Rework canceled");
       return;
@@ -1215,6 +1256,7 @@ async function runReworkMode() {
       running = false;
       els.startButton.disabled = false;
       els.reworkButton.disabled = false;
+      setAgentActionsDisabled(false);
     }
   }
 }
@@ -1239,9 +1281,14 @@ Object.entries(els.agents).forEach(([agentKey, agent]) => {
 
 els.agentChatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (running) {
+    setSideStatus("파이프라인 실행 중에는 직원 질문을 잠시 멈춥니다.");
+    return;
+  }
   const question = els.agentQuestion.value.trim();
   if (!question) return;
   const agentKey = selectedAgent;
+  setSideActionRunning(true);
   els.askAgentButton.disabled = true;
   setSideStatus(`${agentLabels[agentKey]}에게 질문 중...`);
   showSpeech(agentKey, "잠깐만요. 답변 정리 중입니다.");
@@ -1260,13 +1307,19 @@ els.agentChatForm.addEventListener("submit", async (event) => {
   } finally {
     await sleep(1080);
     hideSpeech(agentKey);
-    els.askAgentButton.disabled = false;
+    setSideActionRunning(false);
+    if (!running) els.askAgentButton.disabled = false;
   }
 });
 
 els.reviewArtifactButton.addEventListener("click", async () => {
+  if (running) {
+    setSideStatus("파이프라인 실행 중에는 산출물 재검토를 잠시 멈춥니다.");
+    return;
+  }
   const agentKey = selectedAgent;
   const instruction = els.agentQuestion.value.trim() || `${agentLabels[agentKey]} 역할에 맞게 final 산출물을 다시 검사해줘.`;
+  setSideActionRunning(true);
   els.reviewArtifactButton.disabled = true;
   els.askAgentButton.disabled = true;
   setSideStatus(`${agentLabels[agentKey]}가 산출물 재검토 중...`);
@@ -1287,8 +1340,8 @@ els.reviewArtifactButton.addEventListener("click", async () => {
   } finally {
     await sleep(1080);
     hideSpeech(agentKey);
-    els.reviewArtifactButton.disabled = false;
-    els.askAgentButton.disabled = false;
+    setSideActionRunning(false);
+    if (!running) setAgentActionsDisabled(false);
   }
 });
 
